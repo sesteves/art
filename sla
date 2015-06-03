@@ -1,4 +1,4 @@
-{"sla":[
+[
   {"application":"Ngrams", "maxExecTime":10, "minAccuracy":0.8, "maxCost": 4},
   {"application":"Benchmark1", "maxExecTime":10, "accuracy":0.8, "cost": 4}
-]}
+]
