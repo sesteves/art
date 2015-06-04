@@ -5,7 +5,7 @@ import org.apache.spark.streaming.StreamingContext
 /**
  * Created by sesteves on 03-06-2015.
  */
-class ArtManager(streamingContext: StreamingContext) extends Runnable {
+class ArtManager(ssc: StreamingContext) extends Runnable {
 
 
   def run() {
