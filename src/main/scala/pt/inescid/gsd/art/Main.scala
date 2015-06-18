@@ -12,16 +12,11 @@ object Main {
 
     val jsonStr = scala.io.Source.fromFile("sla").getLines.mkString
     val slas = jsonStr.decodeOption[List[SLA]].getOrElse(Nil)
-
+    val sla = slas.find(_.application=="Ngrams").get
     println(slas)
+    println(sla)
 
   }
 
 }
-case class SLA(application: String, maxExecTime: Double, accuracy: Option[Double], minAccuracy: Option[Double],
-               cost: Option[Double], maxCost: Option[Double])
 
-object SLA {
-  implicit def SLACodecJson: CodecJson[SLA] =
-    casecodec6(SLA.apply, SLA.unapply)("application", "maxExecTime", "accuracy", "minAccuracy", "cost", "maxCost")
-}

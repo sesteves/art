@@ -1,23 +1,39 @@
 package pt.inescid.gsd.art
 
+import argonaut.Argonaut._
+import argonaut.CodecJson
+import org.apache.spark.SparkConf
 import org.apache.spark.streaming.StreamingContext
 import org.slf4j.Logger
 
 /**
  * Created by sesteves on 03-06-2015.
  */
-class ArtManager(ssc: StreamingContext) extends Runnable {
+class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable {
+
+  val SLAFileName = "sla"
+  val IdleDurationthreshold = 4000
+
+  // val appName = sparkConf.get("spark.app.name")
+  val appName = "Ngrams"
+  val windowDuration = sparkConf.get("spark.art.window.duration").toLong
+
+  val jsonStr = scala.io.Source.fromFile(SLAFileName).getLines.mkString
+  val slas = jsonStr.decodeOption[List[SLA]].getOrElse(Nil)
+  val sla = slas.find(_.application==appName).get
+
 
   println("ART MANAGER ACTIVATED!")
 
 
   private var log : Logger = null
 
-  var windowSize = 4000
+  var currentCost = 2
   var delay: Long = -1
   var execTime: Long = -1
 
-  println("ART windowSize: " + windowSize)
+  println("ART windowDuration: " + windowDuration)
+
 
   def run() {
     while(true) {
@@ -25,24 +41,39 @@ class ArtManager(ssc: StreamingContext) extends Runnable {
       println(s"ART Delay: $delay, ExecTime: $execTime")
 
       // if workload is not stable
-      if(execTime > windowSize) {
-
+      if(execTime > windowDuration) {
         println("ART ExecTime > WindowSize")
 
-        // add resources
-        // ssc.checkpoint()
-        println("ART STOPPING StreamingContext")
-        // ssc.stop()
 
-        println("ART Requesting one more executor")
-        ssc.sparkContext.requestExecutors(1)
+        if(currentCost < sla.maxCost.getOrElse(-1.0)) {
+          // add resources
+          // ssc.checkpoint()
+          println("ART STOPPING StreamingContext")
+          // ssc.stop()
 
-        println("ART STARTING StreamingContext")
-        // ssc.start()
+          println("ART Requesting one more executor")
+          ssc.sparkContext.requestExecutors(1)
+
+          currentCost += 1
+
+          println("ART STARTING StreamingContext")
+          // ssc.start()
+
+        }
+
+
+      } else if(windowDuration - execTime > IdleDurationthreshold) {
+
+        if(sla.maxCost.isDefined) {
+
+          // ssc.sparkContext.killExecutor()
+
+        }
+
 
       }
 
-      Thread.sleep(windowSize)
+      Thread.sleep(windowDuration)
     }
   }
 
@@ -55,4 +86,11 @@ class ArtManager(ssc: StreamingContext) extends Runnable {
     this.execTime = execTime
   }
 
+}
+case class SLA(application: String, maxExecTime: Double, accuracy: Option[Double], minAccuracy: Option[Double],
+               cost: Option[Double], maxCost: Option[Double])
+
+object SLA {
+  implicit def SLACodecJson: CodecJson[SLA] =
+    casecodec6(SLA.apply, SLA.unapply)("application", "maxExecTime", "accuracy", "minAccuracy", "cost", "maxCost")
 }
