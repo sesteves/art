@@ -10,12 +10,14 @@ class ArtManager(ssc: StreamingContext) extends Runnable {
 
   println("ART MANAGER ACTIVATED!")
 
+
   private var log : Logger = null
 
-  var windowSize = 10000
+  var windowSize = 4000
   var delay: Long = -1
   var execTime: Long = -1
 
+  println("ART windowSize: " + windowSize)
 
   def run() {
     while(true) {
@@ -29,15 +31,18 @@ class ArtManager(ssc: StreamingContext) extends Runnable {
 
         // add resources
         // ssc.checkpoint()
-        ssc.stop()
+        println("ART STOPPING StreamingContext")
+        // ssc.stop()
 
+        println("ART Requesting one more executor")
         ssc.sparkContext.requestExecutors(1)
 
-        ssc.start()
+        println("ART STARTING StreamingContext")
+        // ssc.start()
 
       }
 
-      Thread.sleep(1000)
+      Thread.sleep(windowSize)
     }
   }
 
