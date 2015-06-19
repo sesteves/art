@@ -12,15 +12,15 @@ import org.slf4j.Logger
 class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable {
 
   val SLAFileName = "sla"
-  val IdleDurationthreshold = 4000
+  val IdleDurationThreshold = 4000
+  val ExecutorBootDuration = 6000
 
-  // val appName = sparkConf.get("spark.app.name")
-  val appName = "Ngrams"
+  val appName = sparkConf.get("spark.app.name")
   val windowDuration = sparkConf.get("spark.art.window.duration").toLong
 
   val jsonStr = scala.io.Source.fromFile(SLAFileName).getLines.mkString
   val slas = jsonStr.decodeOption[List[SLA]].getOrElse(Nil)
-  val sla = slas.find(_.application==appName).get
+  val sla = slas.find(_.application == appName).get
 
 
   println("ART MANAGER ACTIVATED!")
@@ -36,8 +36,13 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable {
 
 
   def run() {
-    while(true) {
+    var delta = 0
 
+    // wait system to stabilize
+    Thread.sleep(windowDuration * 4)
+
+    while(true) {
+      delta = 0
       println(s"ART Delay: $delay, ExecTime: $execTime")
 
       // if workload is not stable
@@ -55,6 +60,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable {
           ssc.sparkContext.requestExecutors(1)
 
           currentCost += 1
+          delta = ExecutorBootDuration
 
           println("ART STARTING StreamingContext")
           // ssc.start()
@@ -62,7 +68,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable {
         }
 
 
-      } else if(windowDuration - execTime > IdleDurationthreshold) {
+      } else if(windowDuration - execTime > IdleDurationThreshold) {
 
         if(sla.maxCost.isDefined) {
 
@@ -73,7 +79,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable {
 
       }
 
-      Thread.sleep(windowDuration)
+      Thread.sleep(windowDuration + delta)
     }
   }
 
