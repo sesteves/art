@@ -29,6 +29,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable {
   private var log : Logger = null
 
   var currentCost = 2
+  var currentAccuracy = 1.0
   var delay: Long = -1
   var execTime: Long = -1
 
@@ -50,20 +51,27 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable {
         println("ART ExecTime > WindowSize")
 
 
-        if(currentCost < sla.maxCost.getOrElse(-1.0)) {
-          // add resources
-          // ssc.checkpoint()
-          println("ART STOPPING StreamingContext")
-          // ssc.stop()
+//        if(currentCost < sla.maxCost.getOrElse(-1.0)) {
+//          // add resources
+//          // ssc.checkpoint()
+//          println("ART STOPPING StreamingContext")
+//          // ssc.stop()
+//
+//          println("ART Requesting one more executor")
+//          ssc.sparkContext.requestExecutors(1)
+//
+//          currentCost += 1
+//          delta = ExecutorBootDuration
+//
+//          println("ART STARTING StreamingContext")
+//          // ssc.start()
+//        }
 
-          println("ART Requesting one more executor")
-          ssc.sparkContext.requestExecutors(1)
+        if(currentAccuracy > sla.minAccuracy.getOrElse(1.0)) {
 
-          currentCost += 1
-          delta = ExecutorBootDuration
+          println("ART Decreasing Accuracy!")
+          currentAccuracy -= 0.1
 
-          println("ART STARTING StreamingContext")
-          // ssc.start()
 
         }
 
