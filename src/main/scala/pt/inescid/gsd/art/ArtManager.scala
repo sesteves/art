@@ -69,8 +69,9 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable {
 
         if(currentAccuracy > sla.minAccuracy.getOrElse(1.0)) {
 
-          println("ART Decreasing Accuracy!")
+
           currentAccuracy -= 0.1
+          println("ART Decreasing Accuracy! currentAccuracy: " + currentAccuracy)
 
 
         }
