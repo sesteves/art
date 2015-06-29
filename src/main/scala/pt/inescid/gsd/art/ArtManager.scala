@@ -9,7 +9,7 @@ import org.slf4j.Logger
 /**
  * Created by sesteves on 03-06-2015.
  */
-class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable {
+class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable with Serializable {
 
   val SLAFileName = "sla"
   val IdleDurationThreshold = 4000
