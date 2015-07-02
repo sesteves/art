@@ -32,7 +32,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable
   private var log : Logger = null
 
   var currentCost = 2
-  var currentAccuracy = 1.0
+  @volatile var currentAccuracy = 1.0
   var delay: Long = -1
   var execTime: Long = -1
 
