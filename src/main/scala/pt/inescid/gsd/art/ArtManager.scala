@@ -1,5 +1,7 @@
 package pt.inescid.gsd.art
 
+import java.rmi.{RemoteException, Remote}
+
 import argonaut.Argonaut._
 import argonaut.CodecJson
 import org.apache.spark.SparkConf
@@ -9,7 +11,8 @@ import org.slf4j.Logger
 /**
  * Created by sesteves on 03-06-2015.
  */
-class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable with Serializable {
+class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable
+  with RemoteArtManager with Serializable {
 
   val SLAFileName = "sla"
   val IdleDurationThreshold = 4000
@@ -88,6 +91,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable w
 
       }
 
+
       Thread.sleep(windowDuration + delta)
     }
   }
@@ -101,6 +105,8 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable w
     this.execTime = execTime
   }
 
+  @throws(classOf[RemoteException])
+  override def getAccuracy(): JsonNumber = currentAccuracy
 }
 case class SLA(application: String, maxExecTime: Double, accuracy: Option[Double], minAccuracy: Option[Double],
                cost: Option[Double], maxCost: Option[Double])
@@ -108,4 +114,9 @@ case class SLA(application: String, maxExecTime: Double, accuracy: Option[Double
 object SLA {
   implicit def SLACodecJson: CodecJson[SLA] =
     casecodec6(SLA.apply, SLA.unapply)("application", "maxExecTime", "accuracy", "minAccuracy", "cost", "maxCost")
+}
+
+trait RemoteArtManager extends Remote {
+  @throws(classOf[RemoteException])
+  def getAccuracy(): Double
 }
