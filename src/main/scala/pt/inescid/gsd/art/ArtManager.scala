@@ -1,5 +1,8 @@
 package pt.inescid.gsd.art
 
+import java.net.InetSocketAddress
+import java.rmi.registry.LocateRegistry
+import java.rmi.server.UnicastRemoteObject
 import java.rmi.{RemoteException, Remote}
 
 import argonaut.Argonaut._
@@ -7,6 +10,8 @@ import argonaut.CodecJson
 import org.apache.spark.SparkConf
 import org.apache.spark.streaming.StreamingContext
 import org.slf4j.Logger
+
+import remotely._, codecs._
 
 /**
  * Created by sesteves on 03-06-2015.
@@ -17,6 +22,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable
   val SLAFileName = "sla"
   val IdleDurationThreshold = 4000
   val ExecutorBootDuration = 6000
+  val ArtServiceName = "artservice"
 
   val appName = sparkConf.get("spark.app.name")
   val windowDuration = sparkConf.get("spark.art.window.duration").toLong
@@ -28,7 +34,6 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable
 
   println("ART MANAGER ACTIVATED!")
 
-
   private var log : Logger = null
 
   var currentCost = 2
@@ -37,6 +42,20 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends Runnable
   var execTime: Long = -1
 
   println("ART windowDuration: " + windowDuration)
+
+  System.setProperty("java.rmi.server.hostname", "localhost")
+  val stub = UnicastRemoteObject.exportObject(this, 0).asInstanceOf[RemoteArtManager]
+  val registry = LocateRegistry.getRegistry
+  registry.rebind(ArtServiceName, stub)
+
+
+
+  val address  = new InetSocketAddress("localhost", 8080)
+  val service = new FactorialServer0
+  val env = service.environment
+  val startServer = env.serve(address)
+  val shutdown = startServer.run
+
 
 
   def run() {
