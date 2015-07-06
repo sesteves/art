@@ -1,5 +1,5 @@
 [
-  {"application":"Ngrams", "maxExecTime":10, "minAccuracy":0.8, "maxCost": 10},
-  {"application":"Benchmark1", "maxExecTime":10, "accuracy":0.8, "cost": 4}
+  {"application":"Ngrams", "maxExecTime":10, "minAccuracy":80, "maxCost": 10, "policy":"maximize-accuracy"},
+  {"application":"Benchmark1", "maxExecTime":10, "accuracy":80, "cost": 4}
 ]
 
