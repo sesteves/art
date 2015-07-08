@@ -38,6 +38,8 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   val slas = jsonStr.decodeOption[List[SLA]].getOrElse(Nil)
   val sla = slas.find(_.application == appName).get
 
+  val self = this
+
   println("ART MANAGER ACTIVATED!")
 
   private var log : Logger = null
@@ -81,18 +83,21 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
         accuracy = a
         // ssc.start()
-        Thread.sleep(execTime + AccuracyChangeDuration)
+        Thread.sleep(delay)
 
         var sumExecTime = 0l
-        for(i <- 1 to 3) {
+        val trials = 5
+        for(i <- 1 to trials) {
+          self.wait()
           println(s"ART profile:$c,$a,$windowDuration,$delay,$execTime")
           sumExecTime += execTime
-          Thread.sleep(delay)
         }
         // ssc.stop()
 
         // average and add to the training set
-        val avgExecTime = sumExecTime / 5
+        val avgExecTime = sumExecTime / trials
+        println(s"ART profile:Average Exec Time: $avgExecTime")
+
         trainingSet += LabeledPoint(a, Vectors.dense(execTime))
       }
     }
@@ -179,6 +184,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
     this.delay = delay
     this.execTime = execTime
+    self.notify()
   }
 
   @throws(classOf[RemoteException])
