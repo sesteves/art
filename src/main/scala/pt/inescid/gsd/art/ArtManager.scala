@@ -8,10 +8,16 @@ import java.rmi.{RemoteException, Remote}
 
 import argonaut.Argonaut._
 import argonaut.CodecJson
+import org.apache.spark.mllib.linalg.Vectors
+import org.apache.spark.mllib.regression.{LabeledPoint, LinearRegressionWithSGD}
 import org.apache.spark.SparkConf
+import org.apache.spark.rdd.RDD
+import org.apache.spark.rdd.UnionRDD
+
 import org.apache.spark.streaming.StreamingContext
 import org.slf4j.Logger
 
+import scala.collection.mutable.ArrayBuffer
 import scala.io.BufferedSource
 
 /**
@@ -59,6 +65,8 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
   def profileWorkload: Unit = {
 
+    var trainingSet = ArrayBuffer.empty[LabeledPoint]
+
     println(s"ART profile:executors,accuracy,window,delay,time")
     val startTick = System.currentTimeMillis()
     for(c <- 1.0 to sla.maxCost.getOrElse(-1.0) by 1.0) {
@@ -75,16 +83,29 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
         // ssc.start()
         Thread.sleep(execTime + AccuracyChangeDuration)
 
-        for(i <- 1 to 5) {
+        var sumExecTime = 0l
+        for(i <- 1 to 3) {
           println(s"ART profile:$c,$a,$windowDuration,$delay,$execTime")
-          Thread.sleep(execTime + 1000)
+          sumExecTime += execTime
+          Thread.sleep(delay)
         }
         // ssc.stop()
+
+        // average and add to the training set
+        val avgExecTime = sumExecTime / 5
+        trainingSet += LabeledPoint(a, Vectors.dense(execTime))
       }
     }
 
     val diff = System.currentTimeMillis() - startTick
     println("ART profiling workload took " + diff + " ms")
+
+
+    // Building the model
+    val numIterations = 100
+    val model = LinearRegressionWithSGD.train(ssc.sparkContext.makeRDD(trainingSet), numIterations)
+
+
 
   }
 

@@ -5,6 +5,6 @@ scalaVersion := "2.10.4"
 
 libraryDependencies ++= Seq(
   "io.argonaut" %% "argonaut" % "6.0.4",
-  "org.apache.spark" %% "spark-streaming" % "1.3.1"
-//  "oncue.svc.remotely" %% "core" % "x.x.+"
+  "org.apache.spark" %% "spark-streaming" % "1.3.1",
+  "org.apache.spark" % "spark-mllib_2.10" % "1.3.1"
 )
