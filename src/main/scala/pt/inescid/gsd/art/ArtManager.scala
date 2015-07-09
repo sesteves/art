@@ -19,6 +19,7 @@ import org.slf4j.Logger
 
 import scala.collection.mutable.ArrayBuffer
 import scala.io.BufferedSource
+import scala.concurrent.Lock
 
 /**
  * Created by sesteves on 03-06-2015.
@@ -38,7 +39,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   val slas = jsonStr.decodeOption[List[SLA]].getOrElse(Nil)
   val sla = slas.find(_.application == appName).get
 
-  val self = this
+  val lock = new Lock()
 
   println("ART MANAGER ACTIVATED!")
 
@@ -83,12 +84,12 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
         accuracy = a
         // ssc.start()
-        Thread.sleep(delay)
+        Thread.sleep(delay + windowDuration)
 
         var sumExecTime = 0l
-        val trials = 5
+        val trials = 10
         for(i <- 1 to trials) {
-          self.wait()
+          lock.acquire()
           println(s"ART profile:$c,$a,$windowDuration,$delay,$execTime")
           sumExecTime += execTime
         }
@@ -108,8 +109,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
     // Building the model
     val numIterations = 100
-    val model = LinearRegressionWithSGD.train(ssc.sparkContext.makeRDD(trainingSet), numIterations)
-
+    val model = LinearRegressionWithSGD.train(ssc.sparkContext.makeRDD(trainingSet).cache(), numIterations)
 
 
   }
@@ -184,7 +184,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
     this.delay = delay
     this.execTime = execTime
-    self.notify()
+    lock.release()
   }
 
   @throws(classOf[RemoteException])
