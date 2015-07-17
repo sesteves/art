@@ -18,7 +18,7 @@ import org.apache.spark.streaming.StreamingContext
 import org.slf4j.Logger
 
 import scala.collection.mutable.ArrayBuffer
-import scala.io.BufferedSource
+import scala.io.{Source, BufferedSource}
 import scala.concurrent.Lock
 
 /**
@@ -27,6 +27,7 @@ import scala.concurrent.Lock
 class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtManager with Serializable {
 
   val SLAFileName = "sla"
+  val ProfileFileName = "profile"
   val IdleDurationThreshold = 4000
   val ExecutorBootDuration = 6000
   val AccuracyChangeDuration = 6000
@@ -35,9 +36,26 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   val appName = sparkConf.get("spark.app.name")
   val windowDuration = sparkConf.get("spark.art.window.duration").toLong
 
+  // loading sla
   val jsonStr = scala.io.Source.fromFile(SLAFileName).getLines.mkString
   val slas = jsonStr.decodeOption[List[SLA]].getOrElse(Nil)
   val sla = slas.find(_.application == appName).get
+
+
+  // loading profile
+  var trainingSet = ArrayBuffer.empty[LabeledPoint]
+
+  for(line <- Source.fromFile(ProfileFileName).getLines()) {
+    val items = line.split(",")
+    trainingSet += LabeledPoint(a, Vectors.dense(execTime))
+  }
+
+
+  val model = LinearRegressionWithSGD.train(ssc.sparkContext.makeRDD(trainingSet).cache(), numIterations)
+
+
+
+
 
   val lock = new Lock()
 
