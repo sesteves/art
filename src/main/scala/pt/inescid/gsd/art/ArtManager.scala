@@ -43,15 +43,15 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
 
   // loading profile
-  var trainingSet = ArrayBuffer.empty[LabeledPoint]
-
-  for(line <- Source.fromFile(ProfileFileName).getLines()) {
-    val items = line.split(",")
-    trainingSet += LabeledPoint(a, Vectors.dense(execTime))
-  }
-
-
-  val model = LinearRegressionWithSGD.train(ssc.sparkContext.makeRDD(trainingSet).cache(), numIterations)
+//  var trainingSet = ArrayBuffer.empty[LabeledPoint]
+//
+//  for(line <- Source.fromFile(ProfileFileName).getLines()) {
+//    val items = line.split(",")
+//    trainingSet += LabeledPoint(a, Vectors.dense(execTime))
+//  }
+//
+//
+//  val model = LinearRegressionWithSGD.train(ssc.sparkContext.makeRDD(trainingSet).cache(), numIterations)
 
 
 
@@ -134,7 +134,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
   def executeWorkload {
     while (true) {
-      var delta = 0
+      var delta = 0l
       println(s"ART Delay: $delay, ExecTime: $execTime")
 
       // if workload is not stable
@@ -161,9 +161,9 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
         if (accuracy > sla.minAccuracy.getOrElse(100)) {
 
 
-          accuracy -= 5
+          accuracy -= 10
           println("ART Decreasing *Accuracy! currentAccuracy: " + accuracy)
-          delta = AccuracyChangeDuration
+          delta = delay + AccuracyChangeDuration
 
         }
 
@@ -190,15 +190,18 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
       Thread.sleep(windowDuration * 4)
 
       println(s"ART Delay: $delay, ExecTime: $execTime")
-      profileWorkload
-      System.exit(0)
+
+      // profileWorkload
+      // System.exit(0)
+
+      executeWorkload
 
     }
   }.start()
 
 
   def updateExecutionTime(delay: Long, execTime: Long) {
-    println(s"ART updateExecutionTime called!")
+    println(s"ART updateExecutionTime: delay: $delay, execTime: $execTime")
 
     this.delay = delay
     this.execTime = execTime
