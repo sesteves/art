@@ -28,13 +28,13 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
   val SLAFileName = "sla"
   val ProfileFileName = "profile"
-  val IdleDurationThreshold = 4000
   val ExecutorBootDuration = 6000
   val AccuracyChangeDuration = 6000
   val ArtServiceName = "artservice"
 
   val appName = sparkConf.get("spark.app.name")
   val windowDuration = sparkConf.get("spark.art.window.duration").toLong
+  val idleDurationThreshold = sparkConf.get("spark.art.idle.threshold", "3000").toLong
 
   // loading sla
   val jsonStr = scala.io.Source.fromFile(SLAFileName).getLines.mkString
@@ -56,10 +56,9 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
 
 
-
   val lock = new Lock()
 
-  println("ART MANAGER ACTIVATED!")
+  println(s"ART MANAGER ACTIVATED! (idleDurationThreshold: $idleDurationThreshold)")
 
   private var log : Logger = null
 
@@ -168,7 +167,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
         }
 
 
-      } else if (windowDuration - execTime > IdleDurationThreshold) {
+      } else if (windowDuration - execTime > idleDurationThreshold) {
 
         if (sla.maxCost.isDefined) {
           // ssc.sparkContext.killExecutor()
@@ -177,7 +176,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
         if(accuracy < 100) {
           accuracy += 10
           println("ART Increasing Accuracy! currentAccuracy: " + accuracy)
-          delta = AccuracyChangeDuration
+          delta = delay + AccuracyChangeDuration
         }
 
       }
