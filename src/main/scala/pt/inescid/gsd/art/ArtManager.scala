@@ -171,11 +171,14 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
       } else if (windowDuration - execTime > IdleDurationThreshold) {
 
         if (sla.maxCost.isDefined) {
-
           // ssc.sparkContext.killExecutor()
-
         }
 
+        if(accuracy < 100) {
+          accuracy += 10
+          println("ART Increasing Accuracy! currentAccuracy: " + accuracy)
+          delta = AccuracyChangeDuration
+        }
 
       }
 
