@@ -31,10 +31,12 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   val ExecutorBootDuration = 6000
   val AccuracyChangeDuration = 6000
   val ArtServiceName = "artservice"
+  val MaxAccuracy = 100
 
   val appName = sparkConf.get("spark.app.name")
   val windowDuration = sparkConf.get("spark.art.window.duration").toLong
   val idleDurationThreshold = sparkConf.get("spark.art.idle.threshold", "3000").toLong
+  val accuracyStep = sparkConf.get("spark.art.accuracy.step", "10").toInt
 
   // loading sla
   val jsonStr = scala.io.Source.fromFile(SLAFileName).getLines.mkString
@@ -157,7 +159,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
         if (accuracy > sla.minAccuracy.getOrElse(100)) {
 
 
-          accuracy -= 10
+          accuracy -= accuracyStep
           println("ART Decreasing *Accuracy! currentAccuracy: " + accuracy)
           delta = delay + AccuracyChangeDuration
 
@@ -170,8 +172,8 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
           // ssc.sparkContext.killExecutor()
         }
 
-        if(accuracy < 100) {
-          accuracy += 10
+        if(accuracy < MaxAccuracy) {
+          accuracy += accuracyStep
           println("ART Increasing Accuracy! currentAccuracy: " + accuracy)
           delta = delay + AccuracyChangeDuration
         }
@@ -190,10 +192,10 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
       println(s"ART Delay: $delay, ExecTime: $execTime")
 
-      profileWorkload
-      System.exit(0)
+      // profileWorkload
+      // System.exit(0)
 
-      // executeWorkload
+      executeWorkload
 
     }
   }.start()
