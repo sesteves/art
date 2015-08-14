@@ -47,13 +47,11 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 //
 //  for(line <- Source.fromFile(ProfileFileName).getLines()) {
 //    val items = line.split(",")
-//    trainingSet += LabeledPoint(a, Vectors.dense(execTime))
+//    trainingSet += LabeledPoint(items(0).toDouble, Vectors.dense(items(1).toDouble,items(2).toDouble))
 //  }
 //
-//
+//  val numIterations = 100
 //  val model = LinearRegressionWithSGD.train(ssc.sparkContext.makeRDD(trainingSet).cache(), numIterations)
-
-
 
 
   val lock = new Lock()
@@ -114,20 +112,19 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
         // average and add to the training set
         val avgExecTime = sumExecTime / trials
-        println(s"ART profile:Average Exec Time: $avgExecTime")
+        println(s"ART profile2:$c,$a,$windowDuration,$delay,$avgExecTime")
 
-        trainingSet += LabeledPoint(a, Vectors.dense(execTime))
+        trainingSet += LabeledPoint(a, Vectors.dense(c, execTime))
       }
     }
 
     val diff = System.currentTimeMillis() - startTick
     println("ART profiling workload took " + diff + " ms")
 
-
     // Building the model
     val numIterations = 100
     val model = LinearRegressionWithSGD.train(ssc.sparkContext.makeRDD(trainingSet).cache(), numIterations)
-
+    model.save(ssc.sparkContext, s"$appName-model")
 
   }
 
@@ -193,10 +190,10 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
       println(s"ART Delay: $delay, ExecTime: $execTime")
 
-      // profileWorkload
-      // System.exit(0)
+      profileWorkload
+      System.exit(0)
 
-      executeWorkload
+      // executeWorkload
 
     }
   }.start()
