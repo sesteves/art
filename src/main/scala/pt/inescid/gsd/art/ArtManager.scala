@@ -59,6 +59,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   val lock = new Lock()
 
   println(s"ART MANAGER ACTIVATED! (idleDurationThreshold: $idleDurationThreshold)")
+  println(s"ART metrics: accuracy,cost,window,delay,execTime")
 
   private var log : Logger = null
 
@@ -181,8 +182,8 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
       }
 
-
       Thread.sleep(windowDuration + delta)
+      // lock.acquire()
     }
   }
 
@@ -204,6 +205,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
   def updateExecutionTime(delay: Long, execTime: Long) {
     println(s"ART updateExecutionTime: delay: $delay, execTime: $execTime")
+    println(s"ART metrics: $accuracy,$cost,$windowDuration,$delay,$execTime")
 
     this.delay = delay
     this.execTime = execTime
