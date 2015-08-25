@@ -160,9 +160,9 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
 
           accuracy -= accuracyStep
-          println("ART Decreasing *Accuracy! currentAccuracy: " + accuracy)
-          delta = delay + AccuracyChangeDuration
-
+          println("ART Decreasing Accuracy! currentAccuracy: " + accuracy)
+          // delta = delay + AccuracyChangeDuration
+          delta = windowDuration
         }
 
 
@@ -175,7 +175,8 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
         if(accuracy < MaxAccuracy) {
           accuracy += accuracyStep
           println("ART Increasing Accuracy! currentAccuracy: " + accuracy)
-          delta = delay + AccuracyChangeDuration
+          // delta = delay + AccuracyChangeDuration
+          delta = windowDuration
         }
 
       }
