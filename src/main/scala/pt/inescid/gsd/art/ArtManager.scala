@@ -57,9 +57,10 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
 
   val lock = new Lock()
+  var countUpdates = 0
 
   println(s"ART MANAGER ACTIVATED! (idleDurationThreshold: $idleDurationThreshold)")
-  println(s"ART metrics: accuracy,cost,window,delay,execTime")
+  println(s"ART metrics: timestamp,ingestionRate,accuracy,cost,window,delay,execTime")
 
   private var log : Logger = null
 
@@ -67,6 +68,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   @volatile var accuracy = 100
   var delay: Long = -1
   var execTime: Long = -1
+  var ingestionRate: Long = -1
 
   println("ART windowDuration: " + windowDuration)
 
@@ -134,6 +136,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   def executeWorkload {
     while (true) {
       var delta = 0l
+      countUpdates = 0
       println(s"ART Delay: $delay, ExecTime: $execTime")
 
       // if workload is not stable
@@ -182,8 +185,8 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
       }
 
-      Thread.sleep(windowDuration + delta)
-      // lock.acquire()
+      // Thread.sleep(windowDuration + delta)
+      lock.acquire()
     }
   }
 
@@ -204,12 +207,17 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
 
   def updateExecutionTime(delay: Long, execTime: Long) {
-    println(s"ART updateExecutionTime: delay: $delay, execTime: $execTime")
-    println(s"ART metrics: $accuracy,$cost,$windowDuration,$delay,$execTime")
+    // println(s"ART updateExecutionTime: delay: $delay, execTime: $execTime")
+    println(s"ART metrics: %d,$ingestionRate,$accuracy,$cost,$windowDuration,$delay,$execTime"
+      .format(System.currentTimeMillis()))
 
     this.delay = delay
     this.execTime = execTime
-    lock.release()
+
+    countUpdates += 1
+    if (countUpdates == 2) {
+      lock.release()
+    }
   }
 
   @throws(classOf[RemoteException])
@@ -224,7 +232,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
         val s = server.accept()
         val in = new BufferedSource(s.getInputStream()).getLines()
         val out = new PrintStream(s.getOutputStream())
-
+        ingestionRate = in.next().toLong
         out.println(accuracy)
         out.flush()
         s.close()
