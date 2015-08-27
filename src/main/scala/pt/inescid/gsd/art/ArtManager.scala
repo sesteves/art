@@ -32,6 +32,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   val AccuracyChangeDuration = 6000
   val ArtServiceName = "artservice"
   val MaxAccuracy = 100
+  val MinCost = 1
 
   val appName = sparkConf.get("spark.app.name")
   val windowDuration = sparkConf.get("spark.art.window.duration").toLong
@@ -64,7 +65,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
   private var log : Logger = null
 
-  var cost = 2
+  var cost = 1
   @volatile var accuracy = 100
   var delay: Long = -1
   var execTime: Long = -1
@@ -144,44 +145,44 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
         println("ART ExecTime > WindowSize")
 
 
-        //        if(cost < sla.maxCost.getOrElse(-1.0)) {
-        //          // add resources
-        //          // ssc.checkpoint()
-        //          println("ART STOPPING StreamingContext")
-        //          // ssc.stop()
-        //
-        //          println("ART Requesting one more executor")
-        //          ssc.sparkContext.requestExecutors(1)
-        //
-        //          cost += 1
-        //          delta = ExecutorBootDuration
-        //
-        //          println("ART STARTING StreamingContext")
-        //          // ssc.start()
-        //        }
+        if(cost < sla.maxCost.getOrElse(-1.0)) {
+          // add resources
+          // ssc.checkpoint()
+          // println("ART STOPPING StreamingContext")
+          // ssc.stop()
 
-        if (accuracy > sla.minAccuracy.getOrElse(100)) {
+          println("ART Requesting one more executor")
+          ssc.sparkContext.requestExecutors(1)
 
+          cost += 1
+          delta = ExecutorBootDuration
 
-          accuracy -= accuracyStep
-          println("ART Decreasing Accuracy! currentAccuracy: " + accuracy)
-          // delta = delay + AccuracyChangeDuration
-          delta = windowDuration
+          // println("ART STARTING StreamingContext")
+          // ssc.start()
         }
+
+//        if (accuracy > sla.minAccuracy.getOrElse(100)) {
+//          accuracy -= accuracyStep
+//          println("ART Decreasing Accuracy! currentAccuracy: " + accuracy)
+//          // delta = delay + AccuracyChangeDuration
+//          delta = windowDuration
+//        }
 
 
       } else if (windowDuration - execTime > idleDurationThreshold) {
 
-        if (sla.maxCost.isDefined) {
-          // ssc.sparkContext.killExecutor()
+        if (sla.maxCost.isDefined && cost > MinCost) {
+          cost -= 1
+          println("ART Decreasing cost to $cost")
+          ssc.sparkContext.killExecutors(null)
         }
 
-        if(accuracy < MaxAccuracy) {
-          accuracy += accuracyStep
-          println("ART Increasing Accuracy! currentAccuracy: " + accuracy)
-          // delta = delay + AccuracyChangeDuration
-          delta = windowDuration
-        }
+//        if(accuracy < MaxAccuracy) {
+//          accuracy += accuracyStep
+//          println("ART Increasing Accuracy! currentAccuracy: " + accuracy)
+//          // delta = delay + AccuracyChangeDuration
+//          delta = windowDuration
+//        }
 
       }
 
