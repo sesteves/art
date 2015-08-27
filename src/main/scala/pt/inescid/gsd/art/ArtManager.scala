@@ -151,10 +151,9 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
           // println("ART STOPPING StreamingContext")
           // ssc.stop()
 
-          println("ART Requesting one more executor")
-          ssc.sparkContext.requestExecutors(1)
-
           cost += 1
+          println(s"ART Increasing cost to $cost")
+          ssc.sparkContext.requestExecutors(1)
           delta = ExecutorBootDuration
 
           // println("ART STARTING StreamingContext")
@@ -173,7 +172,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
         if (sla.maxCost.isDefined && cost > MinCost) {
           cost -= 1
-          println("ART Decreasing cost to $cost")
+          println(s"ART Decreasing cost to $cost")
           ssc.sparkContext.killExecutors(null)
         }
 
