@@ -8,6 +8,7 @@ import java.rmi.{RemoteException, Remote}
 
 import argonaut.Argonaut._
 import argonaut.CodecJson
+import com.google.common.util.concurrent.CycleDetectingLockFactory.Policies
 import org.apache.spark.mllib.linalg.Vectors
 import org.apache.spark.mllib.regression.{LabeledPoint, LinearRegressionWithSGD}
 import org.apache.spark.SparkConf
@@ -25,6 +26,16 @@ import scala.concurrent.Lock
  * Created by sesteves on 03-06-2015.
  */
 class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtManager with Serializable {
+
+  object Policies extends Enumeration {
+    val MaximizeAccuracy = Value("maximize-accuracy")
+    val MinimizeCost= Value("minimize-cost")
+    val minimizeTime = Value("minimize-time")
+  }
+
+  import Policies._
+
+  val DefaultPolicy = MinimizeCost
 
   val SLAFileName = "sla"
   val ProfileFileName = "profile"
@@ -60,7 +71,10 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   val lock = new Lock()
   var countUpdates = 0
 
-  println(s"ART MANAGER ACTIVATED! (idleDurationThreshold: $idleDurationThreshold)")
+
+  val policy = Policies.values.find(_.toString == sla.policy).getOrElse(DefaultPolicy)
+
+  println(s"ART MANAGER ACTIVATED! (policy: $policy, idleDurationThreshold: $idleDurationThreshold)")
   println(s"ART metrics: timestamp,ingestionRate,accuracy,cost,window,delay,execTime")
 
   private var log : Logger = null
@@ -134,6 +148,58 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
   }
 
+
+  def increaseCost: Boolean = {
+    if(cost < sla.maxCost.getOrElse(-1.0)) {
+      // add resources
+      // ssc.checkpoint()
+      // println("ART STOPPING StreamingContext")
+      // ssc.stop()
+
+      cost += 1
+      println(s"ART Increasing cost to $cost")
+      ssc.sparkContext.requestExecutors(1)
+      //delta = ExecutorBootDuration
+
+      // println("ART STARTING StreamingContext")
+      // ssc.start()
+      return true;
+    }
+    return false;
+  }
+
+  def decreaseCost: Boolean = {
+    if (sla.maxCost.isDefined && cost > MinCost) {
+      cost -= 1
+      println(s"ART Decreasing cost to $cost")
+      ssc.sparkContext.killExecutors(null)
+      return true;
+    }
+    return false;
+  }
+
+  def increaseAccuracy : Boolean = {
+    if(accuracy < MaxAccuracy) {
+      accuracy += accuracyStep
+      println("ART Increasing Accuracy! currentAccuracy: " + accuracy)
+      // delta = delay + AccuracyChangeDuration
+      // delta = windowDuration
+      return true;
+    }
+    return false;
+  }
+
+  def decreaseAccuracy: Boolean = {
+    if (accuracy > sla.minAccuracy.getOrElse(100)) {
+      accuracy -= accuracyStep
+      println("ART Decreasing Accuracy! currentAccuracy: " + accuracy)
+      // delta = delay + AccuracyChangeDuration
+    //  delta = windowDuration
+      return true;
+    }
+    return false;
+  }
+
   def executeWorkload {
     while (true) {
       var delta = 0l
@@ -144,44 +210,32 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
       if (execTime > windowDuration) {
         println("ART ExecTime > WindowSize")
 
+        policy match {
+          case MaximizeAccuracy =>
+            if(!increaseCost && !decreaseAccuracy) {
+              println("ART Impossible trinity!")
+            }
 
-        if(cost < sla.maxCost.getOrElse(-1.0)) {
-          // add resources
-          // ssc.checkpoint()
-          // println("ART STOPPING StreamingContext")
-          // ssc.stop()
+          case MinimizeCost =>
+            if(!decreaseAccuracy && !increaseCost) {
+              println("ART Impossible trinity!")
+            }
 
-          cost += 1
-          println(s"ART Increasing cost to $cost")
-          ssc.sparkContext.requestExecutors(1)
-          delta = ExecutorBootDuration
-
-          // println("ART STARTING StreamingContext")
-          // ssc.start()
         }
-
-//        if (accuracy > sla.minAccuracy.getOrElse(100)) {
-//          accuracy -= accuracyStep
-//          println("ART Decreasing Accuracy! currentAccuracy: " + accuracy)
-//          // delta = delay + AccuracyChangeDuration
-//          delta = windowDuration
-//        }
-
 
       } else if (windowDuration - execTime > idleDurationThreshold) {
 
-        if (sla.maxCost.isDefined && cost > MinCost) {
-          cost -= 1
-          println(s"ART Decreasing cost to $cost")
-          ssc.sparkContext.killExecutors(null)
-        }
+        policy match {
+          case MaximizeAccuracy =>
+            if (!increaseAccuracy && !decreaseCost) {
+              println("ART Impossible trinity!")
+            }
 
-//        if(accuracy < MaxAccuracy) {
-//          accuracy += accuracyStep
-//          println("ART Increasing Accuracy! currentAccuracy: " + accuracy)
-//          // delta = delay + AccuracyChangeDuration
-//          delta = windowDuration
-//        }
+          case MinimizeCost =>
+            if(!decreaseCost && !increaseAccuracy) {
+              println("ART Impossible trinity!")
+            }
+        }
 
       }
 
