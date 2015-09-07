@@ -16,10 +16,16 @@ import org.apache.spark.rdd.UnionRDD
 
 import org.apache.spark.streaming.StreamingContext
 import org.slf4j.Logger
+import weka.classifiers.Classifier
+import weka.classifiers.functions.LinearRegression
+import weka.core._
 
 import scala.collection.mutable.ArrayBuffer
 import scala.io.{Source, BufferedSource}
 import scala.concurrent.Lock
+
+
+
 
 /**
  * Created by sesteves on 03-06-2015.
@@ -75,6 +81,15 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   var model: LinearRegressionModel = null
   val trainingSet = ArrayBuffer.empty[LabeledPoint]
   var seenMetrics = Set.empty[LearningMetrics]
+
+
+  val AttributeNames = Array("accuracy", "ingestionRate", "cost", "windowDuration", "execTime")
+  val attributes = new FastVector(AttributeNames.length)
+  AttributeNames.foreach(attr => attributes.addElement(new Attribute(attr)))
+  val trainingInstances = new Instances("art", attributes, 0)
+  trainingInstances.setClassIndex(0)
+  val classifier: Classifier = new LinearRegression
+
 
   val lock = new Lock()
   var countUpdates = 0
@@ -304,9 +319,26 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
     }
 
     // online and incremental learning
-    trainingSet += LabeledPoint(accuracy, Vectors.dense(ingestionRate, cost, windowDuration, execTime))
-    val numIterations = 100
-    model = LinearRegressionWithSGD.train(ssc.sparkContext.makeRDD(trainingSet).cache(), numIterations)
+//    trainingSet += LabeledPoint(accuracy, Vectors.dense(ingestionRate, cost, windowDuration, execTime))
+//    val numIterations = 100
+//    model = LinearRegressionWithSGD.train(ssc.sparkContext.makeRDD(trainingSet).cache(), numIterations)
+
+
+    val newInstance = new Instance(AttributeNames.length)
+    newInstance.setDataset(trainingInstances)
+
+
+    val aaa: Attribute = (Attribute) (attributes.elementAt(0))
+    newInstance.setValue(aaa, accuracy)
+
+    newInstance.setValue(attributes.elementAt(1), ingestionRate)
+    newInstance.setValue(attributes.elementAt(2), cost)
+    newInstance.setValue(attributes.elementAt(3), windowDuration)
+    newInstance.setValue(attributes.elementAt(4), execTime)
+
+    trainingInstances.add(newInstance)
+    classifier.buildClassifier(trainingInstances)
+
     markAsSeen
   }
 
