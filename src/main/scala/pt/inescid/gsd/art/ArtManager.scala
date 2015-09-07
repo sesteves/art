@@ -8,9 +8,8 @@ import java.rmi.{RemoteException, Remote}
 
 import argonaut.Argonaut._
 import argonaut.CodecJson
-import com.google.common.util.concurrent.CycleDetectingLockFactory.Policies
 import org.apache.spark.mllib.linalg.Vectors
-import org.apache.spark.mllib.regression.{LabeledPoint, LinearRegressionWithSGD}
+import org.apache.spark.mllib.regression.{LinearRegressionModel, StreamingLinearRegressionWithSGD, LabeledPoint, LinearRegressionWithSGD}
 import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
 import org.apache.spark.rdd.UnionRDD
@@ -44,10 +43,13 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   val ArtServiceName = "artservice"
   val MaxAccuracy = 100
   val MinCost = 1
+  val DefaultIdleDurationThreshold = "3000"
+  val DefaultIdealDrift = "500"
 
   val appName = sparkConf.get("spark.app.name")
   val windowDuration = sparkConf.get("spark.art.window.duration").toLong
-  val idleDurationThreshold = sparkConf.get("spark.art.idle.threshold", "3000").toLong
+  val idleDurationThreshold = sparkConf.get("spark.art.idle.threshold", DefaultIdleDurationThreshold).toLong
+  val idealDrift = sparkConf.get("spark.art.ideal.drift", DefaultIdealDrift).toLong
   val accuracyStep = sparkConf.get("spark.art.accuracy.step", "10").toInt
 
   // loading sla
@@ -67,10 +69,15 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 //  val numIterations = 100
 //  val model = LinearRegressionWithSGD.train(ssc.sparkContext.makeRDD(trainingSet).cache(), numIterations)
 
+// Consider to use this insteead of MLib: https://github.com/scalanlp/nak/blob/master/src/main/scala/nak/example/PpaExample.scala
+// incremental/online learning http://moa.cms.waikato.ac.nz/details/classification/using-weka/
+
+  var model: LinearRegressionModel = null
+  val trainingSet = ArrayBuffer.empty[LabeledPoint]
+  var seenMetrics = Set.empty[LearningMetrics]
 
   val lock = new Lock()
   var countUpdates = 0
-
 
   val policy = Policies.values.find(_.toString == sla.policy).getOrElse(DefaultPolicy)
 
@@ -145,7 +152,6 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
     val numIterations = 100
     val model = LinearRegressionWithSGD.train(ssc.sparkContext.makeRDD(trainingSet).cache(), numIterations)
     model.save(ssc.sparkContext, s"$appName-model")
-
   }
 
 
@@ -163,9 +169,9 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
       // println("ART STARTING StreamingContext")
       // ssc.start()
-      return true;
+      return true
     }
-    return false;
+    return false
   }
 
   def decreaseCost: Boolean = {
@@ -173,31 +179,43 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
       cost -= 1
       println(s"ART Decreasing cost to $cost")
       ssc.sparkContext.killExecutors(null)
-      return true;
+      return true
     }
-    return false;
+    return false
+  }
+
+  def predictAccuracy: Boolean = {
+    val ingestionRateMbps = (ingestionRate / 1000).toInt
+    val targetExecTime = (windowDuration - idealDrift) / 1000
+    if(seenMetrics.contains(LearningMetrics(ingestionRateMbps, cost, windowDuration, targetExecTime))) {
+      val predictedAccuracy = model.predict(Vectors.dense(ingestionRate, cost, windowDuration, targetExecTime))
+      accuracy = predictedAccuracy.toInt
+      println(s"ART Predicted accuracy: $accuracy")
+      return true
+    }
+    return false
   }
 
   def increaseAccuracy : Boolean = {
-    if(accuracy < MaxAccuracy) {
+    if(accuracy < MaxAccuracy && !predictAccuracy) {
       accuracy += accuracyStep
-      println("ART Increasing Accuracy! currentAccuracy: " + accuracy)
+      println(s"ART Increasing accuracy to $accuracy ")
       // delta = delay + AccuracyChangeDuration
       // delta = windowDuration
-      return true;
+      return true
     }
-    return false;
+    return false
   }
 
   def decreaseAccuracy: Boolean = {
-    if (accuracy > sla.minAccuracy.getOrElse(100)) {
+    if (accuracy > sla.minAccuracy.getOrElse(MaxAccuracy) && !predictAccuracy) {
       accuracy -= accuracyStep
-      println("ART Decreasing Accuracy! currentAccuracy: " + accuracy)
+      println(s"ART Decreasing accuracy to $accuracy")
       // delta = delay + AccuracyChangeDuration
     //  delta = windowDuration
-      return true;
+      return true
     }
-    return false;
+    return false
   }
 
   def executeWorkload {
@@ -260,6 +278,18 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   }.start()
 
 
+  def markAsSeen {
+    if(execTime <= windowDuration) {
+      val ingestionRateMbps = (ingestionRate / 1000).toInt
+      val execTimeSec = execTime / 1000
+      for (ir <- ingestionRateMbps - 2 to ingestionRateMbps + 2) {
+        for (et <- execTimeSec - 2 to execTimeSec + 2) {
+          seenMetrics += LearningMetrics(ir, cost, windowDuration, et)
+        }
+      }
+    }
+  }
+
   def updateExecutionTime(delay: Long, execTime: Long) {
     // println(s"ART updateExecutionTime: delay: $delay, execTime: $execTime")
     println(s"ART metrics: %d,$ingestionRate,$accuracy,$cost,$windowDuration,$delay,$execTime"
@@ -272,6 +302,12 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
     if (countUpdates == 2) {
       lock.release()
     }
+
+    // online and incremental learning
+    trainingSet += LabeledPoint(accuracy, Vectors.dense(ingestionRate, cost, windowDuration, execTime))
+    val numIterations = 100
+    model = LinearRegressionWithSGD.train(ssc.sparkContext.makeRDD(trainingSet).cache(), numIterations)
+    markAsSeen
   }
 
   @throws(classOf[RemoteException])
@@ -296,6 +332,8 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   }.start()
 
 }
+
+case class LearningMetrics(ingestionRate: Int, cost: Int, windowDuration: Long, execTime: Long)
 
 case class SLA(application: String, maxExecTime: Double, accuracy: Option[Int], minAccuracy: Option[Int],
                cost: Option[Double], maxCost: Option[Double], policy: Option[String])
