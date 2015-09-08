@@ -18,13 +18,11 @@ import org.apache.spark.streaming.StreamingContext
 import org.slf4j.Logger
 import weka.classifiers.Classifier
 import weka.classifiers.functions.LinearRegression
-import weka.core._
+import weka.core.{Instance, Instances, Attribute, FastVector}
 
 import scala.collection.mutable.ArrayBuffer
 import scala.io.{Source, BufferedSource}
 import scala.concurrent.Lock
-
-
 
 
 /**
@@ -89,7 +87,6 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   val trainingInstances = new Instances("art", attributes, 0)
   trainingInstances.setClassIndex(0)
   val classifier: Classifier = new LinearRegression
-
 
   val lock = new Lock()
   var countUpdates = 0
@@ -203,11 +200,25 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
     val ingestionRateMbps = (ingestionRate / 1000).toInt
     val targetExecTime = (windowDuration - idealDrift) / 1000
     if(seenMetrics.contains(LearningMetrics(ingestionRateMbps, cost, windowDuration, targetExecTime))) {
-      val predictedAccuracy = model.predict(Vectors.dense(ingestionRate, cost, windowDuration, targetExecTime))
-      accuracy = predictedAccuracy.toInt
+
+      println("ART This metric has already been seen!!!")
+      //val predictedAccuracy = model.predict(Vectors.dense(ingestionRate, cost, windowDuration, targetExecTime))
+      //accuracy = predictedAccuracy.toInt
+
+      val instance = new Instance(AttributeNames.length)
+      instance.setDataset(trainingInstances)
+      instance.setValue(0, -1.0)
+      instance.setValue(1, ingestionRate.toDouble)
+      instance.setValue(2, cost.toDouble)
+      instance.setValue(3, windowDuration.toDouble)
+      instance.setValue(4, targetExecTime.toDouble)
+      accuracy = classifier.classifyInstance(instance).toInt
+
       println(s"ART Predicted accuracy: $accuracy")
       return true
     }
+
+    println("ART predictAccuracy returning false!")
     return false
   }
 
@@ -253,7 +264,6 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
             if(!decreaseAccuracy && !increaseCost) {
               println("ART Impossible trinity!")
             }
-
         }
 
       } else if (windowDuration - execTime > idleDurationThreshold) {
@@ -326,15 +336,11 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
     val newInstance = new Instance(AttributeNames.length)
     newInstance.setDataset(trainingInstances)
-
-
-    val aaa: Attribute = (Attribute) (attributes.elementAt(0))
-    newInstance.setValue(aaa, accuracy)
-
-    newInstance.setValue(attributes.elementAt(1), ingestionRate)
-    newInstance.setValue(attributes.elementAt(2), cost)
-    newInstance.setValue(attributes.elementAt(3), windowDuration)
-    newInstance.setValue(attributes.elementAt(4), execTime)
+    newInstance.setValue(0, accuracy.toDouble)
+    newInstance.setValue(1, ingestionRate.toDouble)
+    newInstance.setValue(2, cost.toDouble)
+    newInstance.setValue(3, windowDuration.toDouble)
+    newInstance.setValue(4, execTime.toDouble)
 
     trainingInstances.add(newInstance)
     classifier.buildClassifier(trainingInstances)
