@@ -218,7 +218,6 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
       return true
     }
 
-    println("ART predictAccuracy returning false!")
     return false
   }
 
