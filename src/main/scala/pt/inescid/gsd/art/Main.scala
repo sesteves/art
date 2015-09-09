@@ -4,7 +4,7 @@ import java.util.ArrayList
 
 import argonaut._, Argonaut._
 import weka.classifiers.Classifier
-import weka.classifiers.functions.LinearRegression
+import weka.classifiers.functions.{SimpleLinearRegression, LinearRegression}
 import weka.classifiers.trees.RandomForest
 import weka.core._
 import scala.collection.JavaConverters._
@@ -38,7 +38,7 @@ object Main {
     trainingInstances.setClassIndex(0)
 
     // val classifier: Classifier = new LinearRegression
-    val classifier = new RandomForest
+    val classifier = new SimpleLinearRegression
 
     val newInstance = new DenseInstance(AttributeNames.length)
     newInstance.setDataset(trainingInstances)

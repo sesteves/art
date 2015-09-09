@@ -18,8 +18,7 @@ import org.apache.spark.rdd.UnionRDD
 import org.apache.spark.streaming.StreamingContext
 import org.slf4j.Logger
 import weka.classifiers.Classifier
-import weka.classifiers.functions.LinearRegression
-import weka.classifiers.trees.RandomForest
+import weka.classifiers.functions.{SimpleLinearRegression, LinearRegression}
 import weka.core.{Instance, Instances, Attribute, DenseInstance}
 
 import scala.collection.mutable.ArrayBuffer
@@ -35,7 +34,8 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   object Policies extends Enumeration {
     val MaximizeAccuracy = Value("maximize-accuracy")
     val MinimizeCost= Value("minimize-cost")
-    val minimizeTime = Value("minimize-time")
+    val MinimizeTime = Value("minimize-time")
+    val Balanced = Value("balanced")
   }
 
   import Policies._
@@ -49,12 +49,16 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   val ArtServiceName = "artservice"
   val MaxAccuracy = 100
   val MinCost = 1
+  val DefaultTotalExecutions = 2 * 60 / 10 * 6 + 6 // 2 minutes * 60 seconds / window of 10 seconds + remaining
+  val DefaultReactWindowMultiple = 2
   val DefaultIdleDurationThreshold = 3000l
   val DefaultIdealDrift = 500l
   var DefaultJitterTolerance = 500l
 
 
   val appName = sparkConf.get("spark.app.name")
+  val totalExecutions = sparkConf.getInt("spark.art.total.executions", DefaultTotalExecutions)
+  val reactWindowMultiple = sparkConf.getInt("spark.art.react.window.multiple", DefaultReactWindowMultiple)
   val windowDuration = sparkConf.get("spark.art.window.duration").toLong
   val idleDurationThreshold = sparkConf.getLong("spark.art.idle.threshold", DefaultIdleDurationThreshold)
   val idealDrift = sparkConf.getLong("spark.art.ideal.drift", DefaultIdealDrift)
@@ -91,7 +95,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   AttributeNames.foreach(attr => attrs.add(new Attribute(attr)))
   val trainingInstances = new Instances("art", attrs, 0)
   trainingInstances.setClassIndex(0)
-  val classifier = new RandomForest
+  val classifier = new SimpleLinearRegression
   // val classifierLinearRegression = new LinearRegression
 
   val lock = new Lock()
@@ -100,6 +104,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   val policy = Policies.values.find(_.toString == sla.policy).getOrElse(DefaultPolicy)
 
   println(s"ART MANAGER ACTIVATED! (policy: $policy, idleDurationThreshold: $idleDurationThreshold)")
+  println(s"ART file: $appName-$idleDurationThreshold-$accuracyStep-$jitterTolerance-$idealDrift-$windowDuration")
   println(s"ART metrics: timestamp,ingestionRate,accuracy,cost,window,delay,execTime")
 
   private var log : Logger = null
@@ -259,6 +264,17 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
     return false
   }
 
+  def increaseBatchDuration: Boolean = {
+
+
+    return false
+  }
+
+  def decreaseBatchDuration: Boolean = {
+
+    return false
+  }
+
   def executeWorkload {
     while (true) {
       var delta = 0l
@@ -279,6 +295,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
             if(!decreaseAccuracy && !increaseCost) {
               println("ART Impossible trinity!")
             }
+          case Balanced =>
         }
 
       } else if (windowDuration - execTime > idleDurationThreshold) {
@@ -288,11 +305,11 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
             if (!increaseAccuracy && !decreaseCost) {
               println("ART Impossible trinity!")
             }
-
           case MinimizeCost =>
             if(!decreaseCost && !increaseAccuracy) {
               println("ART Impossible trinity!")
             }
+          case Balanced =>
         }
 
       }
@@ -327,7 +344,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
     }
 
     // mark as seen if there is nothing else art can do or if we are already operating within ideal conditions
-    if((accuracy == MaxAccuracy && cost == MinCost) ||
+    if((accuracy == MaxAccuracy && cost == MinCost && execTime <= windowDuration) ||
       (execTime >= (windowDuration - idleDurationThreshold) && execTime <= windowDuration)) {
       println("ART Marking as seen")
 
@@ -360,7 +377,10 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
     this.execTime = execTime
 
     countUpdates += 1
-    if (countUpdates == 2) {
+    if(countUpdates == totalExecutions) {
+      System.exit(0)
+    }
+    if (countUpdates % reactWindowMultiple == 0) {
       lock.release()
       markAsSeen
     }
