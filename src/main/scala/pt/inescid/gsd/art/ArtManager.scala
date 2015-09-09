@@ -9,8 +9,8 @@ import java.util
 
 import argonaut.Argonaut._
 import argonaut.CodecJson
-import org.apache.spark.mllib.linalg.Vectors
-import org.apache.spark.mllib.regression.{LinearRegressionModel, StreamingLinearRegressionWithSGD, LabeledPoint, LinearRegressionWithSGD}
+// import org.apache.spark.mllib.linalg.Vectors
+// import org.apache.spark.mllib.regression.{LinearRegressionModel, LabeledPoint, LinearRegressionWithSGD}
 import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
 import org.apache.spark.rdd.UnionRDD
@@ -29,7 +29,8 @@ import scala.concurrent.Lock
 /**
  * Created by sesteves on 03-06-2015.
  */
-class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtManager with Serializable {
+class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: Long => Unit)
+  extends RemoteArtManager with Serializable {
 
   object Policies extends Enumeration {
     val MaximizeAccuracy = Value("maximize-accuracy")
@@ -85,8 +86,8 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 // Consider to use this insteead of MLib: https://github.com/scalanlp/nak/blob/master/src/main/scala/nak/example/PpaExample.scala
 // incremental/online learning http://moa.cms.waikato.ac.nz/details/classification/using-weka/
 
-  var model: LinearRegressionModel = null
-  val trainingSet = ArrayBuffer.empty[LabeledPoint]
+//  var model: LinearRegressionModel = null
+//  val trainingSet = ArrayBuffer.empty[LabeledPoint]
   var seenMetrics = Set.empty[LearningMetrics]
 
 
@@ -133,7 +134,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
 
   def profileWorkload: Unit = {
 
-    var trainingSet = ArrayBuffer.empty[LabeledPoint]
+    // var trainingSet = ArrayBuffer.empty[LabeledPoint]
 
     println(s"ART profile:executors,accuracy,window,delay,time")
     val startTick = System.currentTimeMillis()
@@ -164,7 +165,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
         val avgExecTime = sumExecTime / trials
         println(s"ART profile2:$c,$a,$windowDuration,$delay,$avgExecTime")
 
-        trainingSet += LabeledPoint(a, Vectors.dense(c, execTime))
+        //trainingSet += LabeledPoint(a, Vectors.dense(c, execTime))
       }
     }
 
@@ -172,11 +173,24 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
     println("ART profiling workload took " + diff + " ms")
 
     // Building the model
-    val numIterations = 100
-    val model = LinearRegressionWithSGD.train(ssc.sparkContext.makeRDD(trainingSet).cache(), numIterations)
-    model.save(ssc.sparkContext, s"$appName-model")
+    //val numIterations = 100
+    //val model = LinearRegressionWithSGD.train(ssc.sparkContext.makeRDD(trainingSet).cache(), numIterations)
+    //model.save(ssc.sparkContext, s"$appName-model")
   }
 
+  def profileWorkloadForBatchDuration: Unit = {
+
+    println(s"ART profile:batchDuration,window,delay,time")
+
+    (1000 to 10000).toStream.filter(10000 % _ == 0).foreach(bd => {
+      setBatchDuration(bd);
+      val trials = 2
+      for (t <- 1 to trials) {
+        lock.acquire()
+        println(s"ART profile:$bd,$windowDuration,$delay,$execTime")
+      }
+    })
+  }
 
   def increaseCost: Boolean = {
     if(cost < sla.maxCost.getOrElse(-1.0)) {
@@ -267,6 +281,9 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
   def increaseBatchDuration: Boolean = {
 
 
+    setBatchDuration(1000)
+
+
     return false
   }
 
@@ -329,7 +346,10 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf) extends RemoteArtM
       // profileWorkload
       // System.exit(0)
 
-      executeWorkload
+      profileWorkloadForBatchDuration
+      System.exit(0)
+
+      //executeWorkload
 
     }
   }.start()
