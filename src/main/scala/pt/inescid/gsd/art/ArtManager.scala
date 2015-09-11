@@ -182,11 +182,10 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
     println(s"ART profile:batchDuration,window,delay,time")
 
-    // (1000 to 10000).toStream.filter(10000 % _ == 0).foreach(bd => {
-    List(1000,1250,2000,2500,3000,4000,5000,6000,7000,8000,9000,10000).foreach(bd => {
+    (1000 to 10000).toStream.filter(10000 % _ == 0).foreach(bd => {
       setBatchDuration(bd)
 
-      val trials = 2
+      val trials = 4
       for (t <- 1 to trials) {
         lock.acquire()
         println(s"ART profile:$bd,$windowDuration,$delay,$execTime")
