@@ -351,10 +351,10 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
       // profileWorkload
       // System.exit(0)
 
-      profileWorkloadForBatchDuration
-      System.exit(0)
+      //profileWorkloadForBatchDuration
+      //System.exit(0)
 
-      //executeWorkload
+      executeWorkload
 
     }
   }.start()
