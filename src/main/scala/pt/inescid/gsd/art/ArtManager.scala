@@ -15,7 +15,7 @@ import org.apache.spark.SparkConf
 import org.apache.spark.rdd.RDD
 import org.apache.spark.rdd.UnionRDD
 
-import org.apache.spark.streaming.StreamingContext
+import org.apache.spark.streaming.{Seconds, Duration, StreamingContext}
 import org.slf4j.Logger
 import weka.classifiers.Classifier
 import weka.classifiers.functions.{SimpleLinearRegression, LinearRegression}
@@ -29,8 +29,15 @@ import scala.concurrent.Lock
 /**
  * Created by sesteves on 03-06-2015.
  */
-class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: Long => Unit)
+class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: Long => Unit,
+                 setWindowDuration: (Duration) => Unit)
   extends RemoteArtManager with Serializable {
+
+  object Modes extends Enumeration {
+    val Profile = Value("profile")
+    val Execute = Value("execute")
+  }
+  import Modes._
 
   object Policies extends Enumeration {
     val MaximizeAccuracy = Value("maximize-accuracy")
@@ -38,7 +45,6 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
     val MinimizeTime = Value("minimize-time")
     val Balanced = Value("balanced")
   }
-
   import Policies._
 
   val DefaultPolicy = MinimizeCost
@@ -50,14 +56,17 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   val ArtServiceName = "artservice"
   val MaxAccuracy = 100
   val MinCost = 1
+  val DefaultMode = Execute
   val DefaultTotalExecutions = 2 * 60 / 10 * 6 + 6 // 2 minutes * 60 seconds / window of 10 seconds + remaining
   val DefaultReactWindowMultiple = 2
   val DefaultIdleDurationThreshold = 3000l
   val DefaultIdealDrift = 500l
-  var DefaultJitterTolerance = 500l
+  val DefaultJitterTolerance = 500l
 
 
   val appName = sparkConf.get("spark.app.name")
+  val mode = Modes.values.find(_.toString == sparkConf.get("spark.art.mode", DefaultMode.toString))
+    .getOrElse(DefaultMode)
   val totalExecutions = sparkConf.getInt("spark.art.total.executions", DefaultTotalExecutions)
   val reactWindowMultiple = sparkConf.getInt("spark.art.react.window.multiple", DefaultReactWindowMultiple)
   val windowDuration = sparkConf.get("spark.art.window.duration").toLong
@@ -104,7 +113,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
   val policy = Policies.values.find(_.toString == sla.policy).getOrElse(DefaultPolicy)
 
-  println(s"ART MANAGER ACTIVATED! (policy: $policy, idleDurationThreshold: $idleDurationThreshold)")
+  println(s"ART MANAGER ACTIVATED! (mode: $mode, policy: $policy, idleDurationThreshold: $idleDurationThreshold)")
   println(s"ART file: $appName-$idleDurationThreshold-$accuracyStep-$jitterTolerance-$idealDrift-$windowDuration")
   println(s"ART metrics: timestamp,ingestionRate,accuracy,cost,window,delay,execTime")
 
@@ -193,6 +202,23 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
       for (t <- 1 to trials) {
         lock.acquire()
         println(s"ART profile:$bd,$windowDuration,$delay,$execTime")
+      }
+    })
+  }
+
+  def profileWorkloadForWindowDuration: Unit = {
+
+    println(s"ART profile:batchDuration,window,delay,time")
+
+    Seq(10,5,2).foreach(wd => {
+      if(wd != 10) {
+        setWindowDuration(Seconds(wd))
+      }
+
+      val trials = 2
+      for (t <- 1 to trials) {
+        lock.acquire()
+        println(s"ART profile:$wd,$windowDuration,$delay,$execTime")
       }
     })
   }
@@ -348,14 +374,14 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
       println(s"ART Delay: $delay, ExecTime: $execTime")
 
-      // profileWorkload
-      // System.exit(0)
-
-      //profileWorkloadForBatchDuration
-      //System.exit(0)
-
-      executeWorkload
-
+      if(mode == Profile) {
+        // profileWorkload
+        // System.exit(0)
+        profileWorkloadForWindowDuration
+        System.exit(0)
+      } else if(mode == Execute){
+        executeWorkload
+      }
     }
   }.start()
 
