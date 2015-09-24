@@ -103,36 +103,43 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   val AttributeNames = Array("accuracy", "ingestionRate", "cost", "windowDuration", "execTime")
   val attrs = new util.ArrayList[Attribute]
   AttributeNames.foreach(attr => attrs.add(new Attribute(attr)))
-  val trainingInstances = new Instances("art", attrs, 0)
-  trainingInstances.setClassIndex(0)
-  val classifier = new SimpleLinearRegression
+  val accuracyTrainingInstances = new Instances("art-accuracy", attrs, 0)
+  accuracyTrainingInstances.setClassIndex(attrs.indexOf("accuracy"))
+  val accuracyClassifier = new SimpleLinearRegression
   // val classifierLinearRegression = new LinearRegression
+
+
+  val costTrainingInstances = new Instances("art-cost", attrs, 0)
+  costTrainingInstances.setClassIndex(attrs.indexOf("cost"))
+  val costClassifier = new SimpleLinearRegression
 
   val lock = new Lock()
   var countUpdates = 0
 
-  val policy = Policies.values.find(_.toString == sla.policy).getOrElse(DefaultPolicy)
-
-  println(s"ART MANAGER ACTIVATED! (mode: $mode, policy: $policy, idleDurationThreshold: $idleDurationThreshold)")
-  println(s"ART file: $appName-$idleDurationThreshold-$accuracyStep-$jitterTolerance-$idealDrift-$windowDuration")
-  println(s"ART metrics: timestamp,ingestionRate,accuracy,cost,window,delay,execTime")
+  val policy = Policies.values.find(_.toString == sla.policy.getOrElse(DefaultPolicy.toString)).get
 
   private var log : Logger = null
 
-  var cost = 1
+  println("ART MEMORY STATUS SIZE EXEC: " + ssc.sparkContext.getExecutorMemoryStatus.mkString(","))
+  var cost = ssc.sparkContext.getExecutorMemoryStatus.size - 1
+
+
   @volatile var accuracy = 100
   var delay: Long = -1
   var execTime: Long = -1
   var ingestionRate: Long = -1
 
-  println("ART windowDuration: " + windowDuration)
+  println(s"ART MANAGER ACTIVATED! (mode: $mode, policy: $policy, windowDuration: $windowDuration, " +
+    s"idleDurationThreshold: $idleDurationThreshold, cost: $cost)")
+  println(s"ART file: $appName-$idleDurationThreshold-$accuracyStep-$jitterTolerance-$idealDrift-$windowDuration")
+  println(s"ART metrics: timestamp,ingestionRate,accuracy,cost,window,delay,execTime")
+
+
 
   //System.setProperty("java.rmi.server.hostname", "localhost")
 //  val stub = UnicastRemoteObject.exportObject(this, 0).asInstanceOf[RemoteArtManager]
 //  val registry = LocateRegistry.getRegistry
 //  registry.rebind(ArtServiceName, stub)
-
-
 
 //  val address  = new InetSocketAddress("localhost", 8080)
 //  val service = new FactorialServer0
@@ -262,13 +269,13 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
       //accuracy = predictedAccuracy.toInt
 
       val instance = new DenseInstance(AttributeNames.length)
-      instance.setDataset(trainingInstances)
+      instance.setDataset(accuracyTrainingInstances)
       instance.setValue(0, 0.0)
       instance.setValue(1, ingestionRate.toDouble)
       instance.setValue(2, cost.toDouble)
       instance.setValue(3, windowDuration.toDouble)
       instance.setValue(4, targetExecTime.toDouble)
-      val predictedAccuracy = classifier.classifyInstance(instance).toInt
+      val predictedAccuracy = accuracyClassifier.classifyInstance(instance).toInt
       // val predictedAccuracyLR = classifierLinearRegression.classifyInstance(instance).toInt
       //println(s"ART RF: $predictAccuracy, LR: $predictedAccuracyLR")
 
@@ -406,15 +413,15 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
       }
 
       val newInstance = new DenseInstance(AttributeNames.length)
-      newInstance.setDataset(trainingInstances)
+      newInstance.setDataset(accuracyTrainingInstances)
       newInstance.setValue(0, accuracy.toDouble)
       newInstance.setValue(1, ingestionRate.toDouble)
       newInstance.setValue(2, cost.toDouble)
       newInstance.setValue(3, windowDuration.toDouble)
       newInstance.setValue(4, execTime.toDouble)
 
-      trainingInstances.add(newInstance)
-      classifier.buildClassifier(trainingInstances)
+      accuracyTrainingInstances.add(newInstance)
+      accuracyClassifier.buildClassifier(accuracyTrainingInstances)
       // classifierLinearRegression.buildClassifier(trainingInstances)
     }
   }
