@@ -62,6 +62,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   val DefaultIdleDurationThreshold = 3000l
   val DefaultIdealDrift = 500l
   val DefaultJitterTolerance = 500l
+  val DefaultPredict = true
   val DefaultAccuracyStep = 10
   val DefaultCostStep = 1
   val DefaultIngestionRateScaleFactor = 1000
@@ -76,6 +77,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   val idleDurationThreshold = sparkConf.getLong("spark.art.idle.threshold", DefaultIdleDurationThreshold)
   val idealDrift = sparkConf.getLong("spark.art.ideal.drift", DefaultIdealDrift)
   val jitterTolerance = sparkConf.getLong("spark.art.jitter.tolerance", DefaultJitterTolerance)
+  val predict = sparkConf.getBoolean("spark.art.predict", DefaultPredict)
   val accuracyStep = sparkConf.getInt("spark.art.accuracy.step", DefaultAccuracyStep)
   val costStep = sparkConf.getInt("spark.art.cost.step", DefaultCostStep)
   val ingestionRateScaleFactor = sparkConf.getInt("spark.art.ir.scale.factor", DefaultIngestionRateScaleFactor)
@@ -236,6 +238,8 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   }
 
   def predictCost: Boolean = {
+    if(!predict) return false
+
     val ingestionRateXbps = (ingestionRate / ingestionRateScaleFactor).toInt
     val targetExecTime = (windowDuration - idealDrift)
 
@@ -269,7 +273,6 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
       println(s"ART Predicted cost: $cost")
       return true
     }
-
     return false
   }
 
@@ -303,6 +306,8 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   }
 
   def predictAccuracy: Boolean = {
+    if(!predict) return false
+    
     val ingestionRateXbps = (ingestionRate / ingestionRateScaleFactor).toInt
     val targetExecTime = windowDuration - idealDrift
 
