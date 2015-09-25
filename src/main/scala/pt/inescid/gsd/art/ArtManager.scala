@@ -62,6 +62,9 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   val DefaultIdleDurationThreshold = 3000l
   val DefaultIdealDrift = 500l
   val DefaultJitterTolerance = 500l
+  val DefaultAccuracyStep = 10
+  val DefaultCostStep = 1
+  val DefaultIngestionRateScaleFactor = 1000
 
 
   val appName = sparkConf.get("spark.app.name")
@@ -73,7 +76,9 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   val idleDurationThreshold = sparkConf.getLong("spark.art.idle.threshold", DefaultIdleDurationThreshold)
   val idealDrift = sparkConf.getLong("spark.art.ideal.drift", DefaultIdealDrift)
   val jitterTolerance = sparkConf.getLong("spark.art.jitter.tolerance", DefaultJitterTolerance)
-  val accuracyStep = sparkConf.get("spark.art.accuracy.step", "10").toInt
+  val accuracyStep = sparkConf.getInt("spark.art.accuracy.step", DefaultAccuracyStep)
+  val costStep = sparkConf.getInt("spark.art.cost.step", DefaultCostStep)
+  val ingestionRateScaleFactor = sparkConf.getInt("spark.art.ir.scale.factor", DefaultIngestionRateScaleFactor)
 
   // loading sla
   val jsonStr = scala.io.Source.fromFile(SLAFileName).getLines.mkString
@@ -154,12 +159,12 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
     println(s"ART profile:executors,accuracy,window,delay,time")
     val startTick = System.currentTimeMillis()
-    for(c <- 1.0 to sla.maxCost.getOrElse(-1.0) by 1.0) {
+    for(c <- 1 to sla.maxCost.getOrElse(0) by 1) {
       if(c > 1.0) {
         ssc.sparkContext.requestExecutors(1)
       }
 
-      for(a <- sla.minAccuracy.getOrElse(100) to 100 by 10) {
+      for(a <- sla.minAccuracy.getOrElse(MaxAccuracy) to 100 by 10) {
         // stop accumulating blocks on the queue
         accuracy = 0
         Thread.sleep(delay)
@@ -230,20 +235,56 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
     })
   }
 
+  def predictCost: Boolean = {
+    val ingestionRateXbps = (ingestionRate / ingestionRateScaleFactor).toInt
+    val targetExecTime = (windowDuration - idealDrift)
+
+    // TODO: To be able to make predictions, either the same ingestion rate was already seen
+    // or a lower and higher ingestion rates were already seen
+    if(seenMetrics.contains(LearningMetrics(ingestionRateXbps, accuracy, 0, windowDuration,
+      targetExecTime / ingestionRateScaleFactor))) {
+
+      println("ART This metric has already been seen!!!")
+      //val predictedAccuracy = model.predict(Vectors.dense(ingestionRate, cost, windowDuration, targetExecTime))
+      //accuracy = predictedAccuracy.toInt
+
+      val instance = new DenseInstance(AttributeNames.length)
+      instance.setDataset(costTrainingInstances)
+      instance.setValue(0, accuracy)
+      instance.setValue(1, ingestionRate.toDouble)
+      instance.setValue(2, 0.0)
+      instance.setValue(3, windowDuration.toDouble)
+      instance.setValue(4, targetExecTime.toDouble)
+      val predictedCost = costClassifier.classifyInstance(instance).toInt
+      // val predictedAccuracyLR = classifierLinearRegression.classifyInstance(instance).toInt
+      //println(s"ART RF: $predictAccuracy, LR: $predictedAccuracyLR")
+
+      if(predictedCost < MinCost) {
+        cost = MinCost
+      } else if(predictedCost > sla.maxCost.get) {
+        cost = sla.maxCost.get
+      } else {
+        cost = predictedCost - (predictedCost % costStep)
+      }
+      println(s"ART Predicted cost: $cost")
+      return true
+    }
+
+    return false
+  }
+
   def increaseCost: Boolean = {
-    if(cost < sla.maxCost.getOrElse(-1.0)) {
-      // add resources
-      // ssc.checkpoint()
-      // println("ART STOPPING StreamingContext")
-      // ssc.stop()
+    if(cost < sla.maxCost.getOrElse(MinCost)) {
+      if(!predictCost) {
+        // ssc.stop()
+        cost += costStep
+        println(s"ART Increasing cost to $cost")
+        ssc.sparkContext.requestExecutors(1)
+        //delta = ExecutorBootDuration
 
-      cost += 1
-      println(s"ART Increasing cost to $cost")
-      ssc.sparkContext.requestExecutors(1)
-      //delta = ExecutorBootDuration
-
-      // println("ART STARTING StreamingContext")
-      // ssc.start()
+        // println("ART STARTING StreamingContext")
+        // ssc.start()
+      }
       return true
     }
     return false
@@ -251,18 +292,23 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
   def decreaseCost: Boolean = {
     if (sla.maxCost.isDefined && cost > MinCost) {
-      cost -= 1
-      println(s"ART Decreasing cost to $cost")
-      ssc.sparkContext.killExecutors(null)
+      if(!predictCost) {
+        cost -= costStep
+        println(s"ART Decreasing cost to $cost")
+        ssc.sparkContext.killExecutors(null)
+      }
       return true
     }
     return false
   }
 
   def predictAccuracy: Boolean = {
-    val ingestionRateMbps = (ingestionRate / 1000).toInt
+    val ingestionRateXbps = (ingestionRate / ingestionRateScaleFactor).toInt
     val targetExecTime = windowDuration - idealDrift
-    if(seenMetrics.contains(LearningMetrics(ingestionRateMbps, cost, windowDuration, targetExecTime / 1000))) {
+
+    // TODO: To be able to make predictions, either the same ingestion rate was already seen
+    // or a lower and higher ingestion rates were already seen
+    if(seenMetrics.contains(LearningMetrics(ingestionRateXbps, 0, cost, windowDuration, targetExecTime / 1000))) {
 
       println("ART This metric has already been seen!!!")
       //val predictedAccuracy = model.predict(Vectors.dense(ingestionRate, cost, windowDuration, targetExecTime))
@@ -279,10 +325,13 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
       // val predictedAccuracyLR = classifierLinearRegression.classifyInstance(instance).toInt
       //println(s"ART RF: $predictAccuracy, LR: $predictedAccuracyLR")
 
-      // consider checking if predicted accuracy respects sla specs
-
-      accuracy = predictedAccuracy - (predictedAccuracy % accuracyStep)
-
+      if(predictedAccuracy < sla.minAccuracy.get) {
+        accuracy = sla.minAccuracy.get
+      } else if(predictedAccuracy > MaxAccuracy) {
+        accuracy = MaxAccuracy
+      } else {
+        accuracy = predictedAccuracy - (predictedAccuracy % accuracyStep)
+      }
       println(s"ART Predicted accuracy: $accuracy")
       return true
     }
@@ -395,9 +444,9 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
   def markAsSeen {
 
-    val ingestionRateMbps = (ingestionRate / 1000).toInt
-    val execTimeSec = execTime / 1000
-    if(seenMetrics.contains(LearningMetrics(ingestionRateMbps, cost, windowDuration, execTimeSec))) {
+    val ingestionRateXbps = (ingestionRate / ingestionRateScaleFactor).toInt
+    val execTimeSec = execTime / ingestionRateScaleFactor
+    if(seenMetrics.contains(LearningMetrics(ingestionRateXbps, accuracy, cost, windowDuration, execTimeSec))) {
       return
     }
 
@@ -406,9 +455,10 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
       (execTime >= (windowDuration - idleDurationThreshold) && execTime <= windowDuration)) {
       println("ART Marking as seen")
 
-      for (ir <- ingestionRateMbps - 2 to ingestionRateMbps + 2) {
-        for (et <- execTimeSec - 2 to execTimeSec + 2) {
-          seenMetrics += LearningMetrics(ir, cost, windowDuration, et)
+      for (ir <- ingestionRateXbps - 1 to ingestionRateXbps + 1) {
+        for (et <- execTimeSec - 1 to execTimeSec + 1) {
+          seenMetrics += LearningMetrics(ir, accuracy, 0, windowDuration, et)
+          seenMetrics += LearningMetrics(ir, 0, cost, windowDuration, et)
         }
       }
 
@@ -473,10 +523,10 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
 }
 
-case class LearningMetrics(ingestionRate: Int, cost: Int, windowDuration: Long, execTime: Long)
+case class LearningMetrics(ingestionRate: Int, accuracy: Int, cost: Int, windowDuration: Long, execTime: Long)
 
 case class SLA(application: String, maxExecTime: Double, accuracy: Option[Int], minAccuracy: Option[Int],
-               cost: Option[Double], maxCost: Option[Double], policy: Option[String])
+               cost: Option[Int], maxCost: Option[Int], policy: Option[String])
 
 object SLA {
   implicit def SLACodecJson: CodecJson[SLA] =
