@@ -2,8 +2,6 @@ package pt.inescid.gsd.art
 
 import java.io._
 import java.net.{ServerSocket, InetSocketAddress}
-import java.rmi.registry.LocateRegistry
-import java.rmi.server.UnicastRemoteObject
 import java.rmi.{RemoteException, Remote}
 import java.util
 
@@ -12,16 +10,12 @@ import argonaut.CodecJson
 // import org.apache.spark.mllib.linalg.Vectors
 // import org.apache.spark.mllib.regression.{LinearRegressionModel, LabeledPoint, LinearRegressionWithSGD}
 import org.apache.spark.SparkConf
-import org.apache.spark.rdd.RDD
-import org.apache.spark.rdd.UnionRDD
 
 import org.apache.spark.streaming.{Seconds, Duration, StreamingContext}
 import org.slf4j.Logger
-import weka.classifiers.Classifier
 import weka.classifiers.functions.{SimpleLinearRegression, LinearRegression}
 import weka.core.{Instance, Instances, Attribute, DenseInstance}
 
-import scala.collection.mutable.ArrayBuffer
 import scala.io.{Source, BufferedSource}
 import scala.concurrent.Lock
 
@@ -130,11 +124,12 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   println("ART MEMORY STATUS SIZE EXEC: " + ssc.sparkContext.getExecutorMemoryStatus.mkString(","))
   var cost = ssc.sparkContext.getExecutorMemoryStatus.size - 1
 
-
-  @volatile var accuracy = 100
+  var accuracy = 100
+  var followingAccuracy = -1
   var delay: Long = -1
   var execTime: Long = -1
   var ingestionRate: Long = -1
+  var deltaKnobEffect = 1
 
   println(s"ART MANAGER ACTIVATED! (mode: $mode, policy: $policy, windowDuration: $windowDuration, " +
     s"idleDurationThreshold: $idleDurationThreshold, cost: $cost)")
@@ -202,7 +197,6 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   }
 
   def profileWorkloadForBatchDuration: Unit = {
-
     println(s"ART profile:batchDuration,window,delay,time")
 
     (1000 to 10000).toStream.filter(10000 % _ == 0).foreach(bd => {
@@ -282,10 +276,11 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
         // ssc.stop()
         cost += costStep
         println(s"ART Increasing cost to $cost")
+        println("ART TIME: " + System.currentTimeMillis())
         ssc.sparkContext.requestExecutors(1)
+        deltaKnobEffect = math.ceil(ExecutorBootDuration.toDouble / windowDuration.toDouble).toInt /
+          reactWindowMultiple + 1
         //delta = ExecutorBootDuration
-
-        // println("ART STARTING StreamingContext")
         // ssc.start()
       }
       return true
@@ -298,7 +293,10 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
       if(!predictCost) {
         cost -= costStep
         println(s"ART Decreasing cost to $cost")
+        println("ART TIME: " + System.currentTimeMillis())
         ssc.sparkContext.killExecutors(null)
+        deltaKnobEffect = math.ceil(ExecutorBootDuration.toDouble / windowDuration.toDouble).toInt /
+          reactWindowMultiple + 1
       }
       return true
     }
@@ -312,10 +310,13 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
     val targetExecTime = windowDuration - idealDrift
 
     // TODO: To be able to make predictions, either the same ingestion rate was already seen
-    // or a lower and higher ingestion rates were already seen
+    // or lower and higher ingestion rates were already seen
     if(seenMetrics.contains(LearningMetrics(ingestionRateXbps, 0, cost, windowDuration, targetExecTime / 1000))) {
-
       println("ART This metric has already been seen!!!")
+
+      deltaKnobEffect = math.ceil(delay.toDouble / windowDuration.toDouble).toInt /
+        reactWindowMultiple + 1
+
       //val predictedAccuracy = model.predict(Vectors.dense(ingestionRate, cost, windowDuration, targetExecTime))
       //accuracy = predictedAccuracy.toInt
 
@@ -349,6 +350,8 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
       if(!predictAccuracy) {
         accuracy += accuracyStep
         println(s"ART Increasing accuracy to $accuracy ")
+        deltaKnobEffect = math.ceil(delay.toDouble / windowDuration.toDouble).toInt /
+          reactWindowMultiple + 1
         // delta = delay + AccuracyChangeDuration
         // delta = windowDuration
       }
@@ -360,10 +363,50 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   def decreaseAccuracy: Boolean = {
     if (accuracy > sla.minAccuracy.getOrElse(MaxAccuracy)) {
       if(!predictAccuracy) {
-        accuracy -= accuracyStep
+        // accuracy -= accuracyStep
+
+        // number of rounds to wait until changes on this knob take effect
+        val roundsToWait = math.round(delay.toDouble / windowDuration.toDouble).toInt
+        // calculate accumulated excess of delay by the time changes on this knob take effect
+        val delayExcess = delay - execTime + (execTime - windowDuration) * roundsToWait
+        // target exec time that we need to have to make the system stable
+        val targetExecTime = windowDuration - delayExcess
+        // this gives an hint based on a linear workload
+        val newAccuracy = (accuracy * targetExecTime.toDouble / execTime.toDouble).toInt
+
+        followingAccuracy = math.max((accuracy * (windowDuration - idealDrift).toDouble / execTime.toDouble).toInt,
+          sla.minAccuracy.get)
+
+        val extraRoundsToWait = {
+          // either targetExecTime < 0 or necessary accuracy is below min accuracy
+          if (newAccuracy < sla.minAccuracy.get) {
+            val minExecTime = (execTime * sla.minAccuracy.get.toDouble / accuracy.toDouble).toInt
+
+            accuracy = sla.minAccuracy.get
+
+            // delay excess by the time this knob effect is visible
+            val followingDelayExcess = delayExcess + minExecTime - windowDuration
+
+            val remaining = (windowDuration - minExecTime)
+            // It's not possible to stabilize the workload with just the accuracy
+            if(remaining < 0) {
+              0
+            } else {
+              math.round(followingDelayExcess.toDouble / remaining.toDouble).toInt
+            }
+          } else {
+            accuracy = newAccuracy
+            1
+          }
+        }
+
         println(s"ART Decreasing accuracy to $accuracy")
         // delta = delay + AccuracyChangeDuration
         //  delta = windowDuration
+
+        deltaKnobEffect = (roundsToWait + extraRoundsToWait) / reactWindowMultiple + 1
+
+        println(s"ART roundsToWait $roundsToWait, extraRoundsToWait: $extraRoundsToWait, followingAccuracy: $followingAccuracy, deltaKnobEffect: $deltaKnobEffect")
       }
       return true
     }
@@ -371,16 +414,11 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   }
 
   def increaseBatchDuration: Boolean = {
-
-
     setBatchDuration(1000)
-
-
     return false
   }
 
   def decreaseBatchDuration: Boolean = {
-
     return false
   }
 
@@ -397,12 +435,12 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
         policy match {
           case MaximizeAccuracy =>
             if(!increaseCost && !decreaseAccuracy) {
-              println("ART Impossible trinity!")
+              println("ART Nothing to do.")
             }
 
           case MinimizeCost =>
             if(!decreaseAccuracy && !increaseCost) {
-              println("ART Impossible trinity!")
+              println("ART Nothing to do.")
             }
           case Balanced =>
         }
@@ -412,11 +450,11 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
         policy match {
           case MaximizeAccuracy =>
             if (!increaseAccuracy && !decreaseCost) {
-              println("ART Impossible trinity!")
+              println("ART Nothing to do.")
             }
           case MinimizeCost =>
             if(!decreaseCost && !increaseAccuracy) {
-              println("ART Impossible trinity!")
+              println("ART Nothing to do.")
             }
           case Balanced =>
         }
@@ -446,8 +484,21 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
     }
   }.start()
 
+  // implements speculation
+//  new Thread {
+//    override def run(): Unit = {
+//      while(lastRoundTick < 0) Thread.sleep(1000)
+//      while (true) {
+//        if (System.currentTimeMillis() - lastRoundTick > windowDuration + jitterTolerance) {
+//        } else {
+//        }
+//      }
+//      Thread.sleep(1000)
+//    }
+//  }
 
   def markAsSeen {
+    if(!predict) return
 
     val ingestionRateXbps = (ingestionRate / ingestionRateScaleFactor).toInt
     val execTimeSec = execTime / ingestionRateScaleFactor
@@ -489,13 +540,23 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
     this.delay = delay
     this.execTime = execTime
 
+    println("ART NUMBER OF EXECUTORS: " + ssc.sparkContext.getExecutorMemoryStatus.size + ", TIME: " + System.currentTimeMillis())
+
     countUpdates += 1
     if(countUpdates == totalExecutions) {
       System.exit(0)
     }
-    if (countUpdates % reactWindowMultiple == 0) {
+    if (countUpdates % (reactWindowMultiple * deltaKnobEffect) == 0) {
       lock.release()
+      deltaKnobEffect = 1
       markAsSeen
+    }
+
+    println(s"ART followingAccuracy: $followingAccuracy")
+    if(followingAccuracy > 0 && (execTime + (delay - windowDuration) <= windowDuration)) {
+      println(s"Setting accuracy to following accuracy: $followingAccuracy")
+      accuracy = followingAccuracy
+      followingAccuracy = -1
     }
 
     // online and incremental learning
@@ -508,10 +569,8 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   @throws(classOf[RemoteException])
   override def getAccuracy(): JsonNumber = accuracy
 
-
   new Thread {
     override def run() : Unit = {
-
       val server = new ServerSocket(9999)
       while (true) {
         val s = server.accept()
@@ -525,7 +584,6 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
     }
   }.start()
-
 }
 
 case class LearningMetrics(ingestionRate: Int, accuracy: Int, cost: Int, windowDuration: Long, execTime: Long)
