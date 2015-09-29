@@ -133,6 +133,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   var ingestionRate: Long = -1
   var deltaKnobEffect = 1
   var lastRoundTick: Long = -1
+  var isUnstable = false
 
   println(s"ART MANAGER ACTIVATED! (mode: $mode, policy: $policy, windowDuration: $windowDuration, " +
     s"idleDurationThreshold: $idleDurationThreshold, cost: $cost)")
@@ -279,27 +280,48 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
         // if it is a "small" spike
         if(delay - (windowDuration + jitterTolerance) <= spikeThreshold) {
-          cost += costStep
+          cost = math.min(cost + costStep, sla.maxCost.get)
           ssc.sparkContext.requestExecutors(1)
 
           deltaKnobEffect = math.ceil(ExecutorBootDuration.toDouble / windowDuration.toDouble).toInt /
             reactWindowMultiple + 1
         } else {
+          // number of rounds to wait until changes on this knob take effect
+          val roundsToWait = math.ceil(delay.toDouble / windowDuration.toDouble).toInt
+          // calculate accumulated excess of delay by the time changes on this knob take effect
+          val delayExcess = delay - execTime + (execTime - windowDuration) * roundsToWait
+          // target exec time that we need to have to make the system stable
+          val targetExecTime = windowDuration - delayExcess
+          // this gives an hint based on a linear workload
+          val newCost = math.ceil(cost * execTime.toDouble / targetExecTime.toDouble).toInt
 
-          val roundsToWait = 0
+          val followingCost = math.min(math.ceil(cost * execTime.toDouble / (windowDuration - idealDrift).toDouble).toInt,
+            sla.maxCost.get)
 
+          val extraRoundsToWait = {
+            if (newCost < 0 || newCost > sla.maxCost.get) {
+              val minExecTime = (cost * execTime.toDouble / sla.maxCost.get.toDouble).toLong
 
+              // delay excess by the time this knob effect is visible
+              val followingDelayExcess = delayExcess + minExecTime - windowDuration
 
+              val remaining = (windowDuration - minExecTime)
+              // It's not possible to stabilize the workload with just the accuracy
+              if (remaining < 0) {
+                0
+              } else {
+                math.ceil(followingDelayExcess.toDouble / remaining.toDouble).toInt
+              }
+            } else {
+              1
+            }
+          }
+          cost = if(newCost < 0 || newCost > sla.maxCost.get) sla.maxCost.get else newCost
 
-
-
+          println(s"ART Increasing cost to $cost (ts: ${System.currentTimeMillis()}})")
+          deltaKnobEffect = (roundsToWait + extraRoundsToWait) / reactWindowMultiple + 1
+          println(s"ART roundsToWait $roundsToWait, extraRoundsToWait: $extraRoundsToWait, followingCost: $followingCost, deltaKnobEffect: $deltaKnobEffect")
         }
-
-        println(s"ART Increasing cost to $cost (ts: ${System.currentTimeMillis()}})")
-
-
-
-
       }
       return true
     }
@@ -309,7 +331,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   def decreaseCost: Boolean = {
     if (sla.maxCost.isDefined && cost > MinCost) {
       if(!predictCost) {
-        cost -= costStep
+        cost = math.max(cost - costStep, MinCost)
         println(s"ART Decreasing cost to $cost")
         println("ART TIME: " + System.currentTimeMillis())
         ssc.sparkContext.killExecutors(null)
@@ -366,7 +388,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   def increaseAccuracy : Boolean = {
     if(accuracy < MaxAccuracy) {
       if(!predictAccuracy) {
-        accuracy += accuracyStep
+        accuracy = math.min(accuracy + accuracyStep, MaxAccuracy)
         println(s"ART Increasing accuracy to $accuracy ")
         deltaKnobEffect = 1 / reactWindowMultiple + 1
       }
@@ -381,7 +403,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
         // if it is a "small" spike
         if(delay - (windowDuration + jitterTolerance) <= spikeThreshold) {
-          accuracy -= accuracyStep
+          accuracy = math.max(accuracy - accuracyStep, sla.minAccuracy.get)
           deltaKnobEffect = 1 / reactWindowMultiple + 1
         } else {
           // number of rounds to wait until changes on this knob take effect
@@ -399,7 +421,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
           val extraRoundsToWait = {
             // either targetExecTime < 0 or necessary accuracy is below min accuracy
             if (newAccuracy < sla.minAccuracy.get) {
-              val minExecTime = (execTime * sla.minAccuracy.get.toDouble / accuracy.toDouble).toInt
+              val minExecTime = (execTime * sla.minAccuracy.get.toDouble / accuracy.toDouble).toLong
 
               // delay excess by the time this knob effect is visible
               val followingDelayExcess = delayExcess + minExecTime - windowDuration
@@ -442,8 +464,23 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
       countUpdates = 0
       println(s"ART Delay: $delay, ExecTime: $execTime")
 
-      // if workload is not stable
-      if (execTime > windowDuration + jitterTolerance) {
+      // the system is only unstable if there are 2 consecutive unstable observations
+      val isReallyUnstable = {
+        if (execTime > windowDuration + jitterTolerance) {
+          if(isUnstable) {
+            isUnstable = false
+            true
+          } else {
+            isUnstable = true
+            false
+          }
+        } else {
+          isUnstable = false
+          false
+        }
+      }
+
+      if(isReallyUnstable) {
         println("ART ExecTime > WindowSize")
 
         policy match {
