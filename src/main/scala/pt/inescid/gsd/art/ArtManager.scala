@@ -134,6 +134,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   var deltaKnobEffect = 1
   var lastRoundTick: Long = -1
   var isUnstable = false
+  var isSuperStable = false
 
   println(s"ART MANAGER ACTIVATED! (mode: $mode, policy: $policy, windowDuration: $windowDuration, " +
     s"idleDurationThreshold: $idleDurationThreshold, cost: $cost)")
@@ -279,7 +280,8 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
       if(!predictCost) {
 
         // if it is a "small" spike
-        if(delay - (windowDuration + jitterTolerance) <= spikeThreshold) {
+        //if(delay - (windowDuration + jitterTolerance) <= spikeThreshold) {
+        if(execTime - (windowDuration + jitterTolerance) <= spikeThreshold) {
           cost = math.min(cost + costStep, sla.maxCost.get)
           ssc.sparkContext.requestExecutors(1)
 
@@ -402,7 +404,8 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
       if(!predictAccuracy) {
 
         // if it is a "small" spike
-        if(delay - (windowDuration + jitterTolerance) <= spikeThreshold) {
+       // if(delay - (windowDuration + jitterTolerance) <= spikeThreshold) {
+        if(execTime - (windowDuration + jitterTolerance) <= spikeThreshold) {
           accuracy = math.max(accuracy - accuracyStep, sla.minAccuracy.get)
           deltaKnobEffect = 1 / reactWindowMultiple + 1
         } else {
@@ -480,6 +483,22 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
         }
       }
 
+      val isReallySuperStable = (windowDuration - execTime > idleDurationThreshold)
+//      val isReallySuperStable = {
+//        if (windowDuration - execTime > idleDurationThreshold) {
+//          if(isSuperStable) {
+//            isSuperStable = false
+//            true
+//          } else {
+//            isSuperStable = true
+//            false
+//          }
+//        } else {
+//          isSuperStable = false
+//          false
+//        }
+//      }
+
       if(isReallyUnstable) {
         println("ART ExecTime > WindowSize")
 
@@ -496,7 +515,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
           case Balanced =>
         }
 
-      } else if (windowDuration - execTime > idleDurationThreshold) {
+      } else if (isReallySuperStable) {
 
         policy match {
           case MaximizeAccuracy =>
@@ -611,6 +630,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
     countUpdates += 1
     if(countUpdates == totalExecutions) {
+      ssc.stop()
       System.exit(0)
     }
 
