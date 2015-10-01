@@ -53,14 +53,15 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   val DefaultMode = Execute
   val DefaultTotalExecutions = 2 * 60 / 10 * 6 + 6 // 2 minutes * 60 seconds / window of 10 seconds + remaining
   val DefaultReactWindowMultiple = 2
-  val DefaultIdleDurationThreshold = 3000l
+  // val DefaultIdleDurationThreshold = 3000l
+  val DefaultIdleDurationThreshold = 0.2
   val DefaultIdealDrift = 500l
-  val DefaultJitterTolerance = 500l
+  val DefaultJitterTolerance = 0.05
   val DefaultPredict = true
-  val DefaultAccuracyStep = 10
+  val DefaultAccuracyStep = 0.001
   val DefaultCostStep = 1
   val DefaultIngestionRateScaleFactor = 1000
-  val DefaultSpikeThreshold: Long = 2000
+  val DefaultSpikeThreshold = 0.2
 
 
   val appName = sparkConf.get("spark.app.name")
@@ -69,14 +70,21 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   val totalExecutions = sparkConf.getInt("spark.art.total.executions", DefaultTotalExecutions)
   val reactWindowMultiple = sparkConf.getInt("spark.art.react.window.multiple", DefaultReactWindowMultiple)
   val windowDuration = sparkConf.get("spark.art.window.duration").toLong
-  val idleDurationThreshold = sparkConf.getLong("spark.art.idle.threshold", DefaultIdleDurationThreshold)
+  val idleDurationThresholdPercentage = sparkConf.getDouble("spark.art.idle.threshold", DefaultIdleDurationThreshold)
+  var idleDurationThreshold = math.round(idleDurationThresholdPercentage * windowDuration)
+
   val idealDrift = sparkConf.getLong("spark.art.ideal.drift", DefaultIdealDrift)
-  val jitterTolerance = sparkConf.getLong("spark.art.jitter.tolerance", DefaultJitterTolerance)
+  val jitterTolerancePercentage = sparkConf.getDouble("spark.art.jitter.tolerance", DefaultJitterTolerance)
+  var jitterTolerance = math.round(jitterTolerancePercentage * windowDuration)
+
   val predict = sparkConf.getBoolean("spark.art.predict", DefaultPredict)
-  val accuracyStep = sparkConf.getInt("spark.art.accuracy.step", DefaultAccuracyStep)
+  val accuracyStepPercentage = sparkConf.getDouble("spark.art.accuracy.step", DefaultAccuracyStep)
+  var accuracyStep = math.round(accuracyStepPercentage * windowDuration)
+
   val costStep = sparkConf.getInt("spark.art.cost.step", DefaultCostStep)
   val ingestionRateScaleFactor = sparkConf.getInt("spark.art.ir.scale.factor", DefaultIngestionRateScaleFactor)
-  val spikeThreshold = sparkConf.getLong("spark.art.spike.threshold", DefaultSpikeThreshold)
+  val spikeThresholdPercentage = sparkConf.getDouble("spark.art.spike.threshold", DefaultSpikeThreshold)
+  var spikeThreshold = math.round(spikeThresholdPercentage * windowDuration)
 
   // loading sla
   val jsonStr = scala.io.Source.fromFile(SLAFileName).getLines.mkString
@@ -137,7 +145,8 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   var isSuperStable = false
 
   println(s"ART MANAGER ACTIVATED! (mode: $mode, policy: $policy, windowDuration: $windowDuration, " +
-    s"idleDurationThreshold: $idleDurationThreshold, cost: $cost)")
+    s"idleDurationThreshold: $idleDurationThreshold, spikeThreshold: $spikeThreshold, jitterTolerance: $jitterTolerance, " +
+    s"cost: $cost, accuracyStep: $accuracyStep)")
   println(s"ART file: $appName-$idleDurationThreshold-$accuracyStep-$jitterTolerance-$idealDrift-$windowDuration")
   println(s"ART metrics: timestamp,ingestionRate,accuracy,cost,window,delay,execTime")
 
@@ -469,7 +478,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
       // the system is only unstable if there are 2 consecutive unstable observations
       val isReallyUnstable = {
-        if (execTime > windowDuration + jitterTolerance) {
+        if (delay > windowDuration + jitterTolerance) {
           if(isUnstable) {
             isUnstable = false
             true
@@ -483,7 +492,8 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
         }
       }
 
-      val isReallySuperStable = (windowDuration - execTime > idleDurationThreshold)
+      // val isReallySuperStable = (windowDuration - execTime > idleDurationThreshold)
+      val isReallySuperStable = (windowDuration - delay > idleDurationThreshold)
 //      val isReallySuperStable = {
 //        if (windowDuration - execTime > idleDurationThreshold) {
 //          if(isSuperStable) {
