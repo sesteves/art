@@ -79,7 +79,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
   val predict = sparkConf.getBoolean("spark.art.predict", DefaultPredict)
   val accuracyStepPercentage = sparkConf.getDouble("spark.art.accuracy.step", DefaultAccuracyStep)
-  var accuracyStep = math.round(accuracyStepPercentage * windowDuration)
+  var accuracyStep = math.round(accuracyStepPercentage * windowDuration).toInt
 
   val costStep = sparkConf.getInt("spark.art.cost.step", DefaultCostStep)
   val ingestionRateScaleFactor = sparkConf.getInt("spark.art.ir.scale.factor", DefaultIngestionRateScaleFactor)
@@ -144,7 +144,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   var isUnstable = false
   var isSuperStable = false
 
-  println(s"ART MANAGER ACTIVATED! (mode: $mode, policy: $policy, windowDuration: $windowDuration, " +
+  println(s"ART MANAGER ACTIVATED! (app: $appName, mode: $mode, policy: $policy, windowDuration: $windowDuration, " +
     s"idleDurationThreshold: $idleDurationThreshold, spikeThreshold: $spikeThreshold, jitterTolerance: $jitterTolerance, " +
     s"cost: $cost, accuracyStep: $accuracyStep)")
   println(s"ART file: $appName-$idleDurationThreshold-$accuracyStep-$jitterTolerance-$idealDrift-$windowDuration")
