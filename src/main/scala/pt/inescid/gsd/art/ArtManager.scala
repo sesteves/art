@@ -131,7 +131,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
   private var log : Logger = null
 
-  println("ART MEMORY STATUS SIZE EXEC: " + ssc.sparkContext.getExecutorMemoryStatus.mkString(","))
+  //println("ART MEMORY STATUS SIZE EXEC: " + ssc.sparkContext.getExecutorMemoryStatus.mkString(","))
   var cost = ssc.sparkContext.getExecutorMemoryStatus.size - 1
 
   var accuracy = 100
@@ -147,9 +147,13 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   println(s"ART MANAGER ACTIVATED! (app: $appName, mode: $mode, policy: $policy, windowDuration: $windowDuration, " +
     s"idleDurationThreshold: $idleDurationThreshold, spikeThreshold: $spikeThreshold, jitterTolerance: $jitterTolerance, " +
     s"cost: $cost, accuracyStep: $accuracyStep)")
-  println(s"ART file: $appName-$idleDurationThreshold-$accuracyStep-$jitterTolerance-$idealDrift-$windowDuration")
-  println(s"ART metrics: timestamp,ingestionRate,accuracy,cost,window,delay,execTime")
 
+
+  // initialize stats file
+  val statsFilename = s"stats-${System.currentTimeMillis()}-$appName-$idleDurationThreshold-$accuracyStep" +
+    s"-$jitterTolerance-$idealDrift-$windowDuration.csv"
+  val statsFile = new PrintWriter(statsFilename)
+  statsFile.println("timestamp,ingestionRate,accuracy,cost,window,delay,execTime")
 
 
   //System.setProperty("java.rmi.server.hostname", "localhost")
@@ -509,8 +513,9 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 //        }
 //      }
 
-      if(isReallyUnstable) {
-        println("ART ExecTime > WindowSize")
+      // if(isReallyUnstable) {
+      if(execTime > windowDuration + jitterTolerance) {
+        println("ART Workload is unstable!")
 
         policy match {
           case MaximizeAccuracy =>
@@ -629,9 +634,11 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   }
 
   def updateExecutionTime(delay: Long, execTime: Long) {
-    // println(s"ART updateExecutionTime: delay: $delay, execTime: $execTime")
-    println(s"ART metrics: %d,$ingestionRate,$accuracy,$cost,$windowDuration,$delay,$execTime"
+    println(s"ART UPDATE: delay: $delay, execTime: $execTime, ingestionRate: $ingestionRate, accuracy: " +
+      s"$accuracy, cost: $cost, windowDuration: $windowDuration")
+    statsFile.println(s"%d,$ingestionRate,$accuracy,$cost,$windowDuration,$delay,$execTime"
       .format(System.currentTimeMillis()))
+    statsFile.flush()
 
     this.delay = delay
     this.execTime = execTime
