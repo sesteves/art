@@ -678,14 +678,16 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
   new Thread {
     override def run() : Unit = {
-      val server = new ServerSocket(9999)
+      val server = new ServerSocket(9998)
       while (true) {
         val s = server.accept()
         val in = new BufferedSource(s.getInputStream()).getLines()
-        val out = new PrintStream(s.getOutputStream())
-        ingestionRate = in.next().toLong
-        out.println(accuracy)
-        out.flush()
+        if(in.hasNext) {
+          val out = new PrintStream(s.getOutputStream())
+          ingestionRate = in.next().toLong
+          out.println(accuracy)
+          out.flush()
+        }
         s.close()
       }
 
