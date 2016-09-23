@@ -150,7 +150,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
 
   // initialize stats file
-  val statsFilename = s"stats-${System.currentTimeMillis()}-$appName-$idleDurationThreshold-$accuracyStep" +
+  val statsFilename = s"/home/sesteves/stats-${System.currentTimeMillis()}-$appName-$idleDurationThreshold-$accuracyStep" +
     s"-$jitterTolerance-$idealDrift-$windowDuration.csv"
   val statsFile = new PrintWriter(statsFilename)
   statsFile.println("timestamp,ingestionRate,accuracy,cost,window,delay,execTime")
@@ -515,7 +515,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
       // if(isReallyUnstable) {
       if(execTime > windowDuration + jitterTolerance) {
-        println("ART Workload is unstable!")
+        println("ART WORKLOAD IS UNSTABLE!!!")
 
         policy match {
           case MaximizeAccuracy =>
