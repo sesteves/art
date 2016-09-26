@@ -693,6 +693,18 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
     }
   }.start()
+
+  def main(args: Array[String]) {
+//    ART UPDATE: delay: 28546, execTime: 10407, ingestionRate: 2007, accuracy: 10, cost: 3, windowDuration: 4000
+//    ART NUMBER OF EXECUTORS: 4, TIME: 1474756716546
+//    ART followingAccuracy: 34
+//    ART WORKLOAD IS UNSTABLE!!!
+//    ART Increasing cost to 0 (ts: 1474756716546})
+//    ART roundsToWait 8, extraRoundsToWait: 1, followingCost: 4, deltaKnobEffect: 5
+
+
+
+  }
 }
 
 case class LearningMetrics(ingestionRate: Int, accuracy: Int, cost: Int, windowDuration: Long, execTime: Long)
