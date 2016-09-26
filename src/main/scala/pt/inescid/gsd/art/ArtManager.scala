@@ -150,7 +150,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
 
   // initialize stats file
-  val statsFilename = s"/home/sesteves/stats-${System.currentTimeMillis()}-$appName-$idleDurationThreshold-$accuracyStep" +
+  val statsFilename = s"/home/sesteves/spark-streaming-benchmark/stats-${System.currentTimeMillis()}-$appName-$idleDurationThreshold-$accuracyStep" +
     s"-$jitterTolerance-$idealDrift-$windowDuration.csv"
   val statsFile = new PrintWriter(statsFilename)
   statsFile.println("timestamp,ingestionRate,accuracy,cost,window,delay,execTime")
