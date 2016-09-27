@@ -69,7 +69,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
     .getOrElse(DefaultMode)
   val totalExecutions = sparkConf.getInt("spark.art.total.executions", DefaultTotalExecutions)
   val reactWindowMultiple = sparkConf.getInt("spark.art.react.window.multiple", DefaultReactWindowMultiple)
-  val windowDuration = sparkConf.get("spark.art.window.duration").toLong
+  var windowDuration = sparkConf.get("spark.art.window.duration").toLong
   val idleDurationThresholdPercentage = sparkConf.getDouble("spark.art.idle.threshold", DefaultIdleDurationThreshold)
   var idleDurationThreshold = math.round(idleDurationThresholdPercentage * windowDuration)
 
@@ -702,7 +702,13 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 //    ART Increasing cost to 0 (ts: 1474756716546})
 //    ART roundsToWait 8, extraRoundsToWait: 1, followingCost: 4, deltaKnobEffect: 5
 
+    windowDuration = 4000
+    execTime = 10407
+    delay = 28546
+    accuracy = 10
+    cost = 3
 
+    executeWorkload
 
   }
 }
