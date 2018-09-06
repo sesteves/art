@@ -50,6 +50,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
   val ArtServiceName = "artservice"
   val MaxAccuracy = 100
   val MinCost = 1
+  val DefaultHome = System.getProperty("user.home")
   val DefaultMode = Execute
   val DefaultTotalExecutions = 2 * 60 / 10 * 6 + 6 // 2 minutes * 60 seconds / window of 10 seconds + remaining
   val DefaultReactWindowMultiple = 2
@@ -65,6 +66,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
 
   val appName = sparkConf.get("spark.app.name")
+  val home = sparkConf.get("spark.art.home", DefaultHome)
   val mode = Modes.values.find(_.toString == sparkConf.get("spark.art.mode", DefaultMode.toString))
     .getOrElse(DefaultMode)
   val totalExecutions = sparkConf.getInt("spark.art.total.executions", DefaultTotalExecutions)
@@ -150,7 +152,7 @@ class ArtManager(ssc: StreamingContext, sparkConf: SparkConf, setBatchDuration: 
 
 
   // initialize stats file
-  val statsFilename = s"/home/sesteves/spark-streaming-benchmark/stats-${System.currentTimeMillis()}-$appName-$idleDurationThreshold-$accuracyStep" +
+  val statsFilename = s"$home/stats-${System.currentTimeMillis()}-$appName-$idleDurationThreshold-$accuracyStep" +
     s"-$jitterTolerance-$idealDrift-$windowDuration.csv"
   val statsFile = new PrintWriter(statsFilename)
   statsFile.println("timestamp,ingestionRate,accuracy,cost,window,delay,execTime")
